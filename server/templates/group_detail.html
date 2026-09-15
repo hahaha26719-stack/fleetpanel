@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% import "_policyform.html" as pf %}
+{% block body %}
+<p><a href="{{ url_for('groups') }}">← Groups</a></p>
+<h1>{{ group.name }}</h1>
+<p class="muted">{{ group.description }}</p>
+
+<div class="row">
+  <div class="card">
+    <h2>Members</h2>
+    <form method="post">
+      <input type="hidden" name="action" value="members">
+      <div style="max-height:260px; overflow:auto;">
+      {% for u in all_users if not u.is_admin %}
+        <div class="check">
+          <input type="checkbox" name="members" value="{{ u.id }}" id="m{{ u.id }}" {{ 'checked' if u.id in member_ids }}>
+          <label for="m{{ u.id }}" style="margin:0;">{{ u.username }} <span class="muted">{{ u.display_name }}</span></label>
+        </div>
+      {% endfor %}
+      </div>
+      <button style="margin-top:10px;">Save members</button>
+    </form>
+    <form method="post" action="{{ url_for('group_delete', gid=group.id) }}"
+          onsubmit="return confirm('Delete this group?');" style="margin-top:12px;">
+      <button class="danger">Delete group</button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Group policies</h2>
+  <p class="muted">Applied to <b>every member</b> of this group. Manage 150 users by managing a few groups.</p>
+  <form method="post">
+    <input type="hidden" name="action" value="policy">
+    {{ pf.policy_fields(categories, policy_values) }}
+    <button>Save group policies</button>
+  </form>
+</div>
+{% endblock %}

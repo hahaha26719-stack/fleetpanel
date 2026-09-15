@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.python-version
+
+# App runtime state (never commit secrets or user data)
+server/fleet.db
+server/userdata/
+server/.env
+agent/device_token.json
+agent/agent_config.json
+agent/roaming/
+
+# OS / editor
+.DS_Store
+*.log

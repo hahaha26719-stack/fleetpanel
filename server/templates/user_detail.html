@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% import "_policyform.html" as pf %}
+{% block body %}
+<p><a href="{{ url_for('users') }}">← Users</a></p>
+<h1>{{ user.username }} <span class="muted">{{ user.display_name }}</span></h1>
+
+<div class="row">
+  <div class="card">
+    <h2>Account</h2>
+    <form method="post">
+      <input type="hidden" name="action" value="password">
+      <label>Reset password</label>
+      <input name="password" type="password" placeholder="new password">
+      <button style="margin-top:10px;">Update password</button>
+    </form>
+    <hr style="border-color:var(--line); margin:16px 0;">
+    <form method="post" style="display:inline;">
+      <input type="hidden" name="action" value="toggle">
+      <button class="ghost">{{ 'Disable' if user.enabled else 'Enable' }} account</button>
+    </form>
+    <form method="post" action="{{ url_for('user_delete', uid=user.id) }}" style="display:inline;"
+          onsubmit="return confirm('Delete this user and all their data?');">
+      <button class="danger">Delete user</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Groups</h2>
+    <form method="post">
+      <input type="hidden" name="action" value="membership">
+      {% for g in all_groups %}
+      <div class="check">
+        <input type="checkbox" name="groups" value="{{ g.id }}" id="g{{ g.id }}" {{ 'checked' if g.id in my_groups }}>
+        <label for="g{{ g.id }}" style="margin:0;">{{ g.name }}</label>
+      </div>
+      {% else %}<p class="muted">No groups yet.</p>{% endfor %}
+      <button style="margin-top:10px;">Save membership</button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Per-user policies</h2>
+  <p class="muted">These override any group policies for this user. Blank = inherit from groups.</p>
+  <form method="post">
+    <input type="hidden" name="action" value="policy">
+    {{ pf.policy_fields(categories, policy_values, effective) }}
+    <button>Save user policies</button>
+  </form>
+</div>
+{% endblock %}

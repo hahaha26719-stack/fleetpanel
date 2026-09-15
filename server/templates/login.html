@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="card" style="max-width:360px; margin:60px auto;">
+  <h1>🛡 FleetPanel</h1>
+  <p class="muted">Administrator sign-in.</p>
+  <form method="post">
+    <label>Username</label>
+    <input name="username" autofocus required>
+    <label>Password</label>
+    <input name="password" type="password" required>
+    <button style="margin-top:16px; width:100%;">Sign in</button>
+  </form>
+</div>
+{% endblock %}

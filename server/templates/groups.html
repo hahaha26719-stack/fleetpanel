@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Groups</h1>
+
+<div class="card">
+  <h2>Create group</h2>
+  <form method="post" action="{{ url_for('groups_create') }}">
+    <div class="row">
+      <div><label>Name</label><input name="name" required></div>
+      <div><label>Description</label><input name="description"></div>
+    </div>
+    <button style="margin-top:12px;">Create group</button>
+  </form>
+</div>
+
+<div class="card">
+  <table>
+    <tr><th>Group</th><th>Members</th><th></th></tr>
+    {% for g in groups %}
+    <tr>
+      <td><a href="{{ url_for('group_detail', gid=g.id) }}">{{ g.name }}</a><br><span class="muted">{{ g.description }}</span></td>
+      <td>{{ g.members|length }}</td>
+      <td style="text-align:right;"><a href="{{ url_for('group_detail', gid=g.id) }}">Manage →</a></td>
+    </tr>
+    {% else %}<tr><td colspan="3" class="muted">No groups yet.</td></tr>{% endfor %}
+  </table>
+</div>
+{% endblock %}

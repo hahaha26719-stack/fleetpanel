@@ -1,0 +1,26 @@
+{# Renders the full policy catalog as a form. Pass: categories, policy_values,
+   and optionally `effective` (dict) to show inherited group values. #}
+{% macro policy_fields(categories, policy_values, effective=None) %}
+  {% for cat, items in categories.items() %}
+  <fieldset>
+    <legend>{{ cat }}</legend>
+    {% for p in items %}
+      {% if p.type == 'bool' %}
+        <div class="check">
+          <input type="checkbox" id="{{ p.key }}" name="{{ p.key }}" {{ 'checked' if policy_values.get(p.key) }}>
+          <label for="{{ p.key }}" style="margin:0;">{{ p.label }}
+            {% if effective and p.key in effective and not policy_values.get(p.key) %}
+              <span class="pill">inherited: on</span>{% endif %}
+          </label>
+        </div>
+      {% else %}
+        <label>{{ p.label }}
+          {% if effective and effective.get(p.key) and not policy_values.get(p.key) %}
+            <span class="pill">inherited: {{ effective.get(p.key) }}</span>{% endif %}
+        </label>
+        <input name="{{ p.key }}" value="{{ policy_values.get(p.key, '') }}" placeholder="leave blank to unset">
+      {% endif %}
+    {% endfor %}
+  </fieldset>
+  {% endfor %}
+{% endmacro %}

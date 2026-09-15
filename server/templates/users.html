@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Users</h1>
+
+<div class="card">
+  <h2>Add user</h2>
+  <form method="post" action="{{ url_for('users_create') }}">
+    <div class="row">
+      <div><label>Username</label><input name="username" required></div>
+      <div><label>Display name</label><input name="display_name"></div>
+      <div><label>Password</label><input name="password" type="password" required></div>
+    </div>
+    <div class="check" style="margin-top:10px;">
+      <input type="checkbox" name="is_admin" id="ia"><label for="ia" style="margin:0;">Panel administrator</label>
+    </div>
+    <button style="margin-top:12px;">Create user</button>
+  </form>
+</div>
+
+<div class="card">
+  <table>
+    <tr><th>Username</th><th>Name</th><th>Role</th><th>Status</th><th></th></tr>
+    {% for u in users %}
+    <tr>
+      <td><a href="{{ url_for('user_detail', uid=u.id) }}">{{ u.username }}</a></td>
+      <td>{{ u.display_name or '—' }}</td>
+      <td>{% if u.is_admin %}<span class="pill">admin</span>{% else %}user{% endif %}</td>
+      <td>{% if u.enabled %}<span class="pill">enabled</span>{% else %}<span class="pill off">disabled</span>{% endif %}</td>
+      <td style="text-align:right;"><a href="{{ url_for('user_detail', uid=u.id) }}">Manage →</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

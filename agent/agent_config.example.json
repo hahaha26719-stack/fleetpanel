@@ -1,0 +1,4 @@
+{
+  "server": "https://YOURNAME.duckdns.org",
+  "enroll_secret": "change-me-to-match-server-FLEET_ENROLL_SECRET"
+}

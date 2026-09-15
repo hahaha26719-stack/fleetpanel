@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FleetPanel</title>
+<style>
+  :root { --bg:#0f1220; --card:#1a1f36; --ink:#e7e9f3; --mut:#9aa0b5; --acc:#5b8cff; --ok:#3ecf8e; --err:#ff6b6b; --line:#2a3050; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.5 system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink); }
+  a { color:var(--acc); text-decoration:none; }
+  header { display:flex; align-items:center; gap:20px; padding:14px 24px; background:var(--card); border-bottom:1px solid var(--line); }
+  header .brand { font-weight:700; letter-spacing:.5px; }
+  header nav a { margin-right:16px; color:var(--mut); }
+  header nav a:hover { color:var(--ink); }
+  header .spacer { flex:1; }
+  main { max-width:1000px; margin:24px auto; padding:0 20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:20px; margin-bottom:20px; }
+  h1 { font-size:22px; } h2 { font-size:17px; margin-top:0; }
+  table { width:100%; border-collapse:collapse; }
+  th,td { text-align:left; padding:9px 8px; border-bottom:1px solid var(--line); }
+  th { color:var(--mut); font-weight:600; font-size:13px; text-transform:uppercase; letter-spacing:.4px; }
+  input,select,textarea { background:#0e122a; color:var(--ink); border:1px solid var(--line); border-radius:8px; padding:9px 11px; font:inherit; width:100%; }
+  label { display:block; font-size:13px; color:var(--mut); margin:10px 0 4px; }
+  button, .btn { background:var(--acc); color:#fff; border:0; border-radius:8px; padding:9px 16px; font:inherit; cursor:pointer; }
+  button.ghost, .btn.ghost { background:transparent; border:1px solid var(--line); color:var(--ink); }
+  button.danger { background:var(--err); }
+  .row { display:flex; gap:16px; flex-wrap:wrap; }
+  .row > * { flex:1; min-width:200px; }
+  .pill { display:inline-block; padding:2px 9px; border-radius:99px; font-size:12px; background:#243056; color:var(--acc); }
+  .pill.off { background:#3a2030; color:var(--err); }
+  .flash { padding:11px 14px; border-radius:8px; margin-bottom:14px; }
+  .flash.ok { background:#12352a; color:var(--ok); }
+  .flash.error { background:#3a1e22; color:var(--err); }
+  .muted { color:var(--mut); }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:8px 20px; }
+  fieldset { border:1px solid var(--line); border-radius:10px; margin:0 0 16px; padding:12px 16px; }
+  legend { color:var(--acc); font-weight:600; padding:0 6px; }
+  .check { display:flex; align-items:center; gap:8px; margin:6px 0; }
+  .check input { width:auto; }
+</style>
+</head>
+<body>
+{% if me %}
+<header>
+  <span class="brand">🛡 FleetPanel</span>
+  <nav>
+    <a href="{{ url_for('dashboard') }}">Dashboard</a>
+    <a href="{{ url_for('users') }}">Users</a>
+    <a href="{{ url_for('groups') }}">Groups</a>
+  </nav>
+  <span class="spacer"></span>
+  <span class="muted">{{ me.username }}</span>
+  <a href="{{ url_for('logout') }}" style="margin-left:14px;">Log out</a>
+</header>
+{% endif %}
+<main>
+  {% with msgs = get_flashed_messages(with_categories=true) %}
+    {% for cat, msg in msgs %}<div class="flash {{ cat }}">{{ msg }}</div>{% endfor %}
+  {% endwith %}
+  {% block body %}{% endblock %}
+</main>
+</body>
+</html>
