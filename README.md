@@ -41,7 +41,8 @@ This project has two parts:
 | `lockdown/` | PowerShell scripts for Windows-level enforcement |
 | `duckdns/` | DuckDNS dynamic-DNS updaters |
 | `docs/` | Detailed deployment guide |
-| `setup-server.sh` | One-shot server installer for the VM |
+| `setup-server.sh` | One-shot server installer for a full VM |
+| `setup-pi.sh` | Optimised installer for a Banana Pi / low-RAM ARM board (dual-use) |
 | `setup-agent.bat` | One-shot agent installer for each Windows PC |
 
 ---
@@ -56,6 +57,11 @@ The panel must run 24/7 so agents can check in. Good choices:
 - **Oracle Cloud Ampere** — most generous free tier if you use it.
 
 The setup script works on any Ubuntu/Debian VM.
+
+**Running on a Banana Pi / Raspberry Pi (Armbian/Debian)?** Use the optimised,
+dual-use installer instead — it runs alongside an existing service (e.g. a
+slideshow on port 5000) without disturbing it. See **`docs/PI-SETUP.md`** and
+`setup-pi.sh`.
 
 ---
 
