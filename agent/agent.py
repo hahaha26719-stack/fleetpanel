@@ -247,31 +247,91 @@ def sync_up(cfg, token, username):
     print(f"[agent] pushed {count} roaming file(s) for {username}")
 
 
+# ------------------------------------------------------- importable session API
+# These are used by login_app.py (the full-screen FleetPanel login) as well as
+# the CLI main() below. Keeping them here makes the catalog/apply logic the
+# single source of truth for both entry points.
+
+def authenticate(cfg, token, username, password):
+    """Verify a FleetPanel user against the server.
+    Returns the login info dict (user_id, username, display_name, policies,
+    catalog) on success, or None on bad credentials."""
+    status, body = _request(cfg, "POST", "/api/login", token=token,
+                            json_body={"username": username, "password": password})
+    if status != 200:
+        return None
+    return json.loads(body)
+
+
+def start_session(cfg, token, info):
+    """Begin a user's session on this PC: pull their roaming data, then apply
+    their effective policies. `info` is what authenticate() returned."""
+    sync_down(cfg, token, info["username"])
+    apply_policies(info["policies"], info["catalog"])
+
+
+def revert_policies(policies, catalog):
+    """Return the machine to the 'off' baseline for the policies that were
+    applied, so the next user doesn't inherit the previous user's restrictions.
+    For bool registry policies this writes the 'off' value; for web/app blocks
+    it clears the managed block/list."""
+    for key in policies:
+        spec = catalog.get(key)
+        if not spec:
+            continue
+        kind = spec.get("kind")
+        try:
+            if kind == "registry" and spec.get("type") == "bool":
+                apply_registry(spec, spec.get("off", 0))
+            elif kind == "web_block":
+                apply_web_block("")          # empties the managed hosts block
+            elif kind == "app_block":
+                _clear_app_block(policies[key])
+            # value-type registry / commands are left as-is (no safe generic
+            # revert); the next user's start_session overwrites them anyway.
+        except Exception as e:
+            print(f"[agent] failed to revert '{key}': {e}")
+
+
+def _clear_app_block(value):
+    exes = [e.strip() for e in value.split(",") if e.strip()]
+    base = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options"
+    if not IS_WINDOWS:
+        print(f"[dry-run] clear app-block: {exes}")
+        return
+    for exe in exes:
+        try:
+            winreg.DeleteKey(winreg.HKEY_LOCAL_MACHINE, f"{base}\\{exe}")
+        except FileNotFoundError:
+            pass
+
+
+def end_session(cfg, token, info):
+    """End a user's session: push their roaming data back and revert the
+    per-user policies so the PC is clean for the next login."""
+    sync_up(cfg, token, info["username"])
+    revert_policies(info["policies"], info["catalog"])
+
+
 # --------------------------------------------------------------------------- main
 def main():
+    """CLI entry point (headless / testing). login_app.py is the GUI front end."""
     cfg = load_config()
     token = enroll(cfg)
 
     username = os.environ.get("FLEET_USER") or input("FleetPanel username: ")
     password = os.environ.get("FLEET_PASS") or getpass.getpass("FleetPanel password: ")
 
-    status, body = _request(cfg, "POST", "/api/login", token=token,
-                            json_body={"username": username, "password": password})
-    if status != 200:
-        sys.exit(f"[agent] login failed ({status}). Check credentials.")
-    info = json.loads(body)
+    info = authenticate(cfg, token, username, password)
+    if not info:
+        sys.exit("[agent] login failed. Check credentials.")
     print(f"[agent] welcome {info.get('display_name') or info['username']}")
 
-    # pull roaming data first so the user's session starts with their files
-    sync_down(cfg, token, info["username"])
-
-    # apply the user's effective (group + user) policies
-    apply_policies(info["policies"], info["catalog"])
-
+    start_session(cfg, token, info)
     print("[agent] session ready. (On logoff, run with --logoff to push data back.)")
 
     if "--logoff" in sys.argv:
-        sync_up(cfg, token, info["username"])
+        end_session(cfg, token, info)
 
 
 if __name__ == "__main__":
