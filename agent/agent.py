@@ -313,6 +313,35 @@ def end_session(cfg, token, info):
     revert_policies(info["policies"], info["catalog"])
 
 
+def launch_desktop():
+    """Start the Windows desktop (Explorer) so the user has a normal session
+    after logging into FleetPanel. If Explorer is already running this is a
+    no-op. On non-Windows it's a dry-run print."""
+    if not IS_WINDOWS:
+        print("[dry-run] launch desktop (explorer.exe)")
+        return
+    try:
+        # Only start Explorer if it isn't already the shell/running.
+        out = subprocess.run('tasklist /FI "IMAGENAME eq explorer.exe"',
+                             shell=True, capture_output=True, text=True)
+        if "explorer.exe" not in out.stdout.lower():
+            subprocess.Popen("explorer.exe", shell=True)
+    except Exception as e:
+        print(f"[agent] could not launch desktop: {e}")
+
+
+def close_desktop():
+    """Close the user's desktop/apps for a clean handoff to the next user.
+    Stops Explorer (the login app keeps running as its own process)."""
+    if not IS_WINDOWS:
+        print("[dry-run] close desktop (taskkill explorer.exe)")
+        return
+    try:
+        subprocess.run("taskkill /f /im explorer.exe", shell=True, check=False)
+    except Exception as e:
+        print(f"[agent] could not close desktop: {e}")
+
+
 # --------------------------------------------------------------------------- main
 def main():
     """CLI entry point (headless / testing). login_app.py is the GUI front end."""

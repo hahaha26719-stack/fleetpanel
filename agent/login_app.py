@@ -145,6 +145,9 @@ class FleetLogin(tk.Tk):
         except Exception as e:
             self.after(0, lambda: self.show_login(f"Session error: {e}", is_error=True))
             return
+        # Launch the Windows desktop (Explorer) so the user has a usable session,
+        # then step the login app aside.
+        agent.launch_desktop()
         self.after(0, lambda: self.show_session(info))
 
     # ----------------------------------------------------------- session screen
@@ -162,16 +165,29 @@ class FleetLogin(tk.Tk):
                  font=self.h2, fg=MUT, bg=CARD).pack(anchor="w", pady=(4, 8))
 
         n = len(info.get("policies", {}))
-        tk.Label(card, text=f"{n} polic{'y' if n == 1 else 'ies'} applied to this PC.",
+        tk.Label(card, text=f"{n} polic{'y' if n == 1 else 'ies'} applied. Your desktop is ready.",
                  font=self.base, fg=OK, bg=CARD).pack(anchor="w", pady=(0, 22))
 
         self.status = tk.Label(card, text="", font=self.base, fg=MUT, bg=CARD)
         self.status.pack(anchor="w", pady=(0, 8))
 
+        tk.Label(card, text="Use the desktop normally. Come back to this window\n"
+                            "(check the taskbar) and click below when you're done.",
+                 font=self.base, fg=MUT, bg=CARD, justify="left").pack(anchor="w", pady=(0, 12))
+
         logout = tk.Button(card, text="Log out / Switch user", font=self.h2, bg=ERR, fg="white",
                            relief="flat", activebackground="#e05555", activeforeground="white",
                            cursor="hand2", command=self.on_logout)
         logout.pack(fill="x", ipady=8)
+
+        # Step aside so the user can actually use the desktop: leave full-screen
+        # and minimize. The window stays available on the taskbar to log out.
+        try:
+            self.attributes("-fullscreen", False)
+            self.attributes("-topmost", False)
+            self.iconify()
+        except Exception:
+            pass
 
     def on_logout(self):
         self.status.config(text="Saving your files and cleaning up…")
@@ -180,10 +196,22 @@ class FleetLogin(tk.Tk):
     def _do_logout(self):
         try:
             agent.end_session(self.cfg, self.token, self.info)
+            agent.close_desktop()   # close the user's apps/desktop for a clean handoff
         except Exception as e:
             self.after(0, lambda: self.status.config(text=f"Logout error: {e}", fg=ERR))
             return
-        self.after(0, lambda: self.show_login("You have been signed out.", is_error=False))
+        self.after(0, self._back_to_login)
+
+    def _back_to_login(self):
+        # restore the full-screen login for the next user
+        try:
+            self.deiconify()
+            if not WINDOWED:
+                self.attributes("-fullscreen", True)
+                self.attributes("-topmost", True)
+        except Exception:
+            pass
+        self.show_login("You have been signed out.", is_error=False)
 
 
 def build():
