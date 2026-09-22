@@ -270,6 +270,71 @@ def start_session(cfg, token, info):
     apply_policies(info["policies"], info["catalog"])
 
 
+# ------------------------------------------------------------------- watchdog
+# Continuously re-applies (re-checks) the entire registry policy set so that:
+#   * policies stay enforced for the whole session, and
+#   * if a user edits a value out of the registry, it snaps back within
+#     `interval` seconds (self-healing).
+# NOTE: this keeps values CORRECT; some HKLM keys (e.g. USBSTOR Start) are only
+# read by Windows at boot/driver-load, so their *effect* still needs a reboot —
+# but the watchdog guarantees the value can't be silently removed. Requires the
+# agent to run as admin/SYSTEM to write HKLM.
+import threading as _threading
+
+_watchdog_stop = None
+_watchdog_thread = None
+
+
+def _reapply_quiet(policies, catalog):
+    """Re-apply every policy without the chatty per-policy logging."""
+    for key, value in policies.items():
+        spec = catalog.get(key)
+        if not spec:
+            continue
+        kind = spec.get("kind")
+        try:
+            if spec.get("type") == "bool" and kind == "registry":
+                apply_registry(spec, spec.get("on", 1))
+            elif kind == "registry":
+                apply_registry(spec, value)
+            elif kind == "command":
+                apply_command(spec, value)
+            elif kind == "app_block":
+                apply_app_block(value)
+            elif kind == "web_block":
+                apply_web_block(value)
+        except Exception:
+            pass  # stay quiet; try again next tick
+
+
+def start_watchdog(info, interval=10):
+    """Start a background thread that re-checks the whole policy set every
+    `interval` seconds until stop_watchdog() is called."""
+    global _watchdog_stop, _watchdog_thread
+    stop_watchdog()  # ensure only one running
+    _watchdog_stop = _threading.Event()
+    policies, catalog = info["policies"], info["catalog"]
+
+    def loop(stop_evt):
+        print(f"[agent] watchdog running (re-check every {interval}s, "
+              f"{len(policies)} policies)")
+        while not stop_evt.wait(interval):
+            _reapply_quiet(policies, catalog)
+
+    _watchdog_thread = _threading.Thread(target=loop, args=(_watchdog_stop,), daemon=True)
+    _watchdog_thread.start()
+    return _watchdog_thread
+
+
+def stop_watchdog():
+    """Stop the re-check loop (call on logout)."""
+    global _watchdog_stop, _watchdog_thread
+    if _watchdog_stop is not None:
+        _watchdog_stop.set()
+    _watchdog_thread = None
+    _watchdog_stop = None
+
+
 def revert_policies(policies, catalog):
     """Return the machine to the 'off' baseline for the policies that were
     applied, so the next user doesn't inherit the previous user's restrictions.

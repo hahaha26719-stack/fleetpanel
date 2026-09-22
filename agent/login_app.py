@@ -145,6 +145,8 @@ class FleetLogin(tk.Tk):
         except Exception as e:
             self.after(0, lambda: self.show_login(f"Session error: {e}", is_error=True))
             return
+        # Start the watchdog so policies stay enforced / self-heal all session.
+        agent.start_watchdog(info, interval=10)
         # Launch the Windows desktop (Explorer) so the user has a usable session,
         # then step the login app aside.
         agent.launch_desktop()
@@ -195,6 +197,7 @@ class FleetLogin(tk.Tk):
 
     def _do_logout(self):
         try:
+            agent.stop_watchdog()   # stop re-applying this user's policies
             agent.end_session(self.cfg, self.token, self.info)
             agent.close_desktop()   # close the user's apps/desktop for a clean handoff
         except Exception as e:
