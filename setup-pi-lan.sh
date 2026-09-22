@@ -37,24 +37,41 @@ echo "[1/5] Installing packages (minimal — no nginx/certbot needed)..."
 apt-get update -y
 apt-get install -y python3 python3-venv python3-pip curl ca-certificates
 
-echo "[2/5] Installing FleetPanel to $APP_DIR..."
+echo "[2/5] Installing/updating FleetPanel code in $APP_DIR (keeping your data)..."
 mkdir -p "$APP_DIR/server"
-cp -r "$SRC_DIR/." "$APP_DIR/server/"
+# Copy the CODE only; never overwrite the database, user data, or secrets.
+# --exclude keeps fleet.db / userdata / .env intact across re-runs.
+if command -v rsync >/dev/null 2>&1; then
+  rsync -a --exclude 'fleet.db' --exclude 'userdata/' --exclude '.env' \
+        "$SRC_DIR/" "$APP_DIR/server/"
+else
+  # rsync not present: copy code files but explicitly preserve data files.
+  cp -r "$SRC_DIR/." "$APP_DIR/server/.__new" 2>/dev/null || true
+  rm -f "$APP_DIR/server/.__new/fleet.db" 2>/dev/null || true
+  rm -rf "$APP_DIR/server/.__new/userdata" 2>/dev/null || true
+  cp -r "$APP_DIR/server/.__new/." "$APP_DIR/server/"
+  rm -rf "$APP_DIR/server/.__new"
+fi
 cd "$APP_DIR/server"
-python3 -m venv .venv
+python3 -m venv .venv 2>/dev/null || true
 ./.venv/bin/pip install --quiet --upgrade pip
 ./.venv/bin/pip install --quiet -r requirements.txt
 
-echo "[3/5] Generating secrets..."
-SECRET="$(python3 -c 'import secrets;print(secrets.token_hex(32))')"
-ENROLL="$(python3 -c 'import secrets;print(secrets.token_urlsafe(18))')"
-cat > "$APP_DIR/server/.env" <<EOF
+echo "[3/5] Configuring secrets (preserving existing so users/token survive)..."
+if [[ -f "$APP_DIR/server/.env" ]]; then
+  echo "  Existing .env found — keeping current secrets, DB, and users."
+else
+  SECRET="$(python3 -c 'import secrets;print(secrets.token_hex(32))')"
+  ENROLL="$(python3 -c 'import secrets;print(secrets.token_urlsafe(18))')"
+  cat > "$APP_DIR/server/.env" <<EOF
 FLEET_SECRET=$SECRET
 FLEET_ENROLL_SECRET=$ENROLL
 FLEET_DB=$APP_DIR/server/fleet.db
 FLEET_DATA=$APP_DIR/server/userdata
 EOF
-chmod 600 "$APP_DIR/server/.env"
+  chmod 600 "$APP_DIR/server/.env"
+  echo "  New .env created (first install)."
+fi
 
 echo "[4/5] Creating systemd service (binds to ALL interfaces on :$PORT)..."
 # 0.0.0.0 so any PC on the LAN can reach it. Low-memory gunicorn tuning.
@@ -80,8 +97,13 @@ EOF
 id www-data >/dev/null 2>&1 || useradd -r -s /usr/sbin/nologin www-data
 chown -R www-data:www-data "$APP_DIR"
 systemctl daemon-reload
-systemctl enable --now fleetpanel
+systemctl enable fleetpanel
+systemctl restart fleetpanel   # restart so updated code loads (safe on re-runs)
 sleep 2
+
+# Read the ACTUAL current enrollment secret from .env (works on first install
+# and on re-runs where we preserved the existing one).
+ENROLL="$(grep '^FLEET_ENROLL_SECRET=' "$APP_DIR/server/.env" | cut -d= -f2-)"
 
 echo "[5/5] Checking service..."
 if systemctl is-active --quiet fleetpanel; then
