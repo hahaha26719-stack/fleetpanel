@@ -78,10 +78,30 @@ class FleetLogin(tk.Tk):
         self.show_login()
 
     def _escape_hatch(self, event=None):
-        """Emergency exit for admins: stop the watchdog, open the desktop, and
-        close the login app so you can never be locked out. Bound to Ctrl+Alt+Q."""
+        """ADMIN-ONLY emergency exit (Ctrl+Alt+Q). Prompts for a FleetPanel
+        ADMIN password; only if it verifies does it stop the watchdog, revert
+        the current user's policies, and drop to the desktop. This is a recovery
+        tool for admins — NOT a bypass button for ordinary users."""
+        from tkinter import simpledialog, messagebox
+        pw = simpledialog.askstring("Admin unlock",
+                                    "Enter a FleetPanel ADMIN password to unlock this PC:",
+                                    show="•", parent=self)
+        if not pw:
+            return  # cancelled — stay locked
+        # Verify against the server as an ADMIN account (admins are the only
+        # ones allowed to unlock). We check via a dedicated admin-verify call.
+        ok = self._verify_admin(pw)
+        if not ok:
+            messagebox.showerror("Admin unlock", "Incorrect admin password.", parent=self)
+            return
+        # Authorised: tear down restrictions and hand over the desktop.
         try:
             agent.stop_watchdog()
+        except Exception:
+            pass
+        try:
+            if self.info:
+                agent.revert_policies(self.info.get("policies", {}), self.info.get("catalog", {}))
         except Exception:
             pass
         try:
@@ -89,6 +109,14 @@ class FleetLogin(tk.Tk):
         except Exception:
             pass
         self.destroy()
+
+    def _verify_admin(self, password):
+        """Ask the server to confirm this is a valid ADMIN password (any admin
+        account). Returns True/False. Fails closed on error."""
+        try:
+            return agent.verify_admin(self.cfg, self.token, password)
+        except Exception:
+            return False
 
     # ------------------------------------------------------------- login screen
     def show_login(self, message=None, is_error=False):

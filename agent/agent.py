@@ -263,6 +263,21 @@ def authenticate(cfg, token, username, password):
     return json.loads(body)
 
 
+def verify_admin(cfg, token, password, username=""):
+    """Ask the server whether `password` belongs to a FleetPanel admin account.
+    Used by the admin-only escape hatch. Returns True/False; fails closed."""
+    body_obj = {"password": password}
+    if username:
+        body_obj["username"] = username
+    status, body = _request(cfg, "POST", "/api/verify_admin", token=token, json_body=body_obj)
+    if status != 200:
+        return False
+    try:
+        return bool(json.loads(body).get("ok"))
+    except Exception:
+        return False
+
+
 def start_session(cfg, token, info):
     """Begin a user's session on this PC: pull their roaming data, then apply
     their effective policies. `info` is what authenticate() returned."""

@@ -263,6 +263,28 @@ def api_login():
     })
 
 
+@app.route("/api/verify_admin", methods=["POST"])
+def api_verify_admin():
+    """Used by the agent's admin-only escape hatch (Ctrl+Alt+Q). Confirms that
+    the supplied password matches SOME enabled admin account. Optionally a
+    username can be supplied to check a specific admin. Returns {"ok": bool}."""
+    _agent_auth()
+    data = request.get_json(force=True, silent=True) or {}
+    password = data.get("password", "")
+    username = data.get("username", "").strip()
+    if not password:
+        return jsonify({"ok": False})
+    if username:
+        u = models.verify_login(username, password)
+        return jsonify({"ok": bool(u and u["is_admin"])})
+    # no username: accept if the password matches ANY enabled admin
+    for u in models.list_users():
+        if u["is_admin"] and u["enabled"]:
+            if models.verify_login(u["username"], password):
+                return jsonify({"ok": True})
+    return jsonify({"ok": False})
+
+
 @app.route("/api/policies/<username>", methods=["GET"])
 def api_policies(username):
     """Agent re-fetches a logged-in user's effective policies (e.g. on refresh)."""
