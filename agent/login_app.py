@@ -59,9 +59,15 @@ class FleetLogin(tk.Tk):
             self.geometry("900x620")
         else:
             self.attributes("-fullscreen", True)
-            # In real kiosk use, disable close/alt-f4 via the OS; here we just
-            # capture Escape to exit only in windowed/test mode.
+            self.attributes("-topmost", True)
         self.bind("<Escape>", lambda e: self.destroy() if WINDOWED else None)
+
+        # ---- ESCAPE HATCH (always available, even full-screen) --------------
+        # Ctrl+Alt+Q: emergency exit — closes the login app and opens the
+        # desktop so an admin can always get in. This is your safety net so the
+        # kiosk can never fully trap you. (Ctrl+Alt+Del also always works.)
+        self.bind_all("<Control-Alt-q>", self._escape_hatch)
+        self.bind_all("<Control-Alt-Q>", self._escape_hatch)
 
         self.h1 = tkfont.Font(family="Segoe UI", size=26, weight="bold")
         self.h2 = tkfont.Font(family="Segoe UI", size=15)
@@ -70,6 +76,19 @@ class FleetLogin(tk.Tk):
         self.container = tk.Frame(self, bg=BG)
         self.container.place(relx=0.5, rely=0.5, anchor="center")
         self.show_login()
+
+    def _escape_hatch(self, event=None):
+        """Emergency exit for admins: stop the watchdog, open the desktop, and
+        close the login app so you can never be locked out. Bound to Ctrl+Alt+Q."""
+        try:
+            agent.stop_watchdog()
+        except Exception:
+            pass
+        try:
+            agent.launch_desktop()
+        except Exception:
+            pass
+        self.destroy()
 
     # ------------------------------------------------------------- login screen
     def show_login(self, message=None, is_error=False):
