@@ -159,16 +159,24 @@ class FleetLogin(tk.Tk):
         threading.Thread(target=self._start_session, args=(info,), daemon=True).start()
 
     def _start_session(self, info):
+        # Core session setup (roaming + policies). If this fails, back to login.
         try:
             agent.start_session(self.cfg, self.token, info)
         except Exception as e:
             self.after(0, lambda: self.show_login(f"Session error: {e}", is_error=True))
             return
-        # Start the watchdog so policies stay enforced / self-heal all session.
-        agent.start_watchdog(info, interval=10)
-        # Launch the Windows desktop (Explorer) so the user has a usable session,
-        # then step the login app aside.
-        agent.launch_desktop()
+
+        # The watchdog and desktop launch are NON-CRITICAL: a failure here must
+        # NOT stall the login. Each is isolated so we always reach the session.
+        try:
+            agent.start_watchdog(info, interval=30)
+        except Exception as e:
+            print(f"[agent] watchdog failed to start (continuing): {e}")
+        try:
+            agent.launch_desktop()
+        except Exception as e:
+            print(f"[agent] desktop launch failed (continuing): {e}")
+
         self.after(0, lambda: self.show_session(info))
 
     # ----------------------------------------------------------- session screen

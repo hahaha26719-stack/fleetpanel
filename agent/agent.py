@@ -307,23 +307,35 @@ def _reapply_quiet(policies, catalog):
             pass  # stay quiet; try again next tick
 
 
-def start_watchdog(info, interval=10):
+def start_watchdog(info, interval=30):
     """Start a background thread that re-checks the whole policy set every
-    `interval` seconds until stop_watchdog() is called."""
+    `interval` seconds until stop_watchdog() is called. Fails safe: never
+    raises to the caller, so it can't stall login."""
     global _watchdog_stop, _watchdog_thread
-    stop_watchdog()  # ensure only one running
-    _watchdog_stop = _threading.Event()
-    policies, catalog = info["policies"], info["catalog"]
+    try:
+        stop_watchdog()  # ensure only one running
+        policies = (info or {}).get("policies") or {}
+        catalog = (info or {}).get("catalog") or {}
+        if not policies:
+            print("[agent] no policies to watch; watchdog not started")
+            return None
+        _watchdog_stop = _threading.Event()
 
-    def loop(stop_evt):
-        print(f"[agent] watchdog running (re-check every {interval}s, "
-              f"{len(policies)} policies)")
-        while not stop_evt.wait(interval):
-            _reapply_quiet(policies, catalog)
+        def loop(stop_evt):
+            print(f"[agent] watchdog running (re-check every {interval}s, "
+                  f"{len(policies)} policies)")
+            while not stop_evt.wait(interval):
+                try:
+                    _reapply_quiet(policies, catalog)
+                except Exception:
+                    pass  # never let the loop die
 
-    _watchdog_thread = _threading.Thread(target=loop, args=(_watchdog_stop,), daemon=True)
-    _watchdog_thread.start()
-    return _watchdog_thread
+        _watchdog_thread = _threading.Thread(target=loop, args=(_watchdog_stop,), daemon=True)
+        _watchdog_thread.start()
+        return _watchdog_thread
+    except Exception as e:
+        print(f"[agent] start_watchdog error (ignored): {e}")
+        return None
 
 
 def stop_watchdog():
