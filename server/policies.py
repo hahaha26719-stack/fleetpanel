@@ -32,7 +32,25 @@ def _reg_value(key, label, category, hive, path, name, regtype="REG_SZ"):
 _EXPLORER_HKCU = r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer"
 _SYSTEM_HKCU = r"Software\Microsoft\Windows\CurrentVersion\Policies\System"
 
+def _mode(key, label, category):
+    """A 'mode' policy: a dropdown (allow-all-except / block-all-except) plus a
+    comma-separated list of exceptions. Stored as one string of the form
+    'allow_except:a.com,b.com' or 'block_except:a.com,b.com'. Enforced inside
+    the FleetPanel kid apps (browser / launcher / notepad), not via the OS."""
+    return {"key": key, "label": label, "category": category, "type": "mode",
+            "apply": {"kind": "app_mode"}}
+
+
 POLICIES = [
+    # ===================================================== Kid-launcher modes (NEW)
+    # These three drive the child-friendly launcher + simplified apps. Each is a
+    # dropdown + exception list, enforced inside our own apps.
+    _mode("web_mode", "Websites: allow or block all, with exceptions", "Kid Launcher"),
+    _mode("app_mode", "Apps: allow or block all, with exceptions "
+                      "(exceptions = notepad, powerpoint, edge)", "Kid Launcher"),
+    _mode("picture_mode", "Picture search: allow or block all, with exceptions "
+                          "(keywords/sources)", "Kid Launcher"),
+
     # =========================================================== Web restrictions
     {"key": "blocked_websites",
      "label": "Blocked websites (comma-separated domains, e.g. facebook.com, tiktok.com)",
@@ -331,3 +349,33 @@ def categories():
     for p in POLICIES:
         cats.setdefault(p["category"], []).append(p)
     return cats
+
+
+# --------------------------------------------------------------- mode helpers
+def parse_mode(value):
+    """Parse a stored 'mode' value into (mode, [items]).
+    value like 'allow_except:a.com, b.com' -> ('allow_except', ['a.com','b.com'])
+    Empty/None -> ('allow_except', []) meaning 'allow everything'."""
+    if not value:
+        return ("allow_except", [])
+    if ":" in value:
+        mode, rest = value.split(":", 1)
+    else:
+        mode, rest = "block_except", value
+    mode = mode.strip() if mode.strip() in ("allow_except", "block_except") else "allow_except"
+    items = [x.strip().lower() for x in rest.split(",") if x.strip()]
+    return (mode, items)
+
+
+def is_allowed(value, candidate):
+    """Decide whether `candidate` (a domain, app name, or keyword) is permitted
+    under a mode policy value.
+      allow_except + list  => everything allowed EXCEPT items in the list (blocklist)
+      block_except + list  => everything blocked EXCEPT items in the list (allowlist)
+    Matching is case-insensitive substring (so 'cat' matches 'cat.com')."""
+    mode, items = parse_mode(value)
+    cand = (candidate or "").strip().lower()
+    hit = any(it and it in cand for it in items)
+    if mode == "block_except":
+        return hit          # only the listed items are allowed
+    return not hit          # allow_except: listed items are blocked

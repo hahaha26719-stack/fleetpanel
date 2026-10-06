@@ -13,6 +13,22 @@
               <span class="pill">inherited: on</span>{% endif %}
           </label>
         </div>
+      {% elif p.type == 'mode' %}
+        {% set raw = policy_values.get(p.key, '') %}
+        {% set mode = raw.split(':')[0] if ':' in raw else ('block_except' if raw else 'allow_except') %}
+        {% set listv = raw.split(':', 1)[1] if ':' in raw else (raw if raw else '') %}
+        <label>{{ p.label }}
+          {% if effective and effective.get(p.key) and not policy_values.get(p.key) %}
+            <span class="pill">inherited: {{ effective.get(p.key) }}</span>{% endif %}
+        </label>
+        <div class="row">
+          <select name="{{ p.key }}__mode" style="max-width:260px;">
+            <option value="allow_except" {{ 'selected' if mode == 'allow_except' }}>Allow everything EXCEPT…</option>
+            <option value="block_except" {{ 'selected' if mode == 'block_except' }}>Block everything EXCEPT…</option>
+          </select>
+          <input name="{{ p.key }}__list" value="{{ listv }}"
+                 placeholder="comma-separated list (the exceptions)">
+        </div>
       {% else %}
         <label>{{ p.label }}
           {% if effective and effective.get(p.key) and not policy_values.get(p.key) %}

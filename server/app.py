@@ -215,6 +215,15 @@ def _read_policy_form(p):
     """Translate a submitted form field into a stored policy value."""
     if p["type"] == "bool":
         return "1" if request.form.get(p["key"]) else ""
+    if p["type"] == "mode":
+        mode = request.form.get(p["key"] + "__mode", "allow_except")
+        lst = request.form.get(p["key"] + "__list", "").strip()
+        if mode not in ("allow_except", "block_except"):
+            mode = "allow_except"
+        # Store nothing if it's the permissive default with no list (= "allow all")
+        if mode == "allow_except" and not lst:
+            return ""
+        return f"{mode}:{lst}"
     return request.form.get(p["key"], "").strip()
 
 
@@ -296,6 +305,136 @@ def api_policies(username):
         "policies": models.effective_policies(user["id"]),
         "catalog": {p["key"]: p["apply"] | {"type": p["type"]} for p in pol.POLICIES},
     })
+
+
+# ============================================================ PICTURE SEARCH
+# The Pi fetches images from Openverse (free, no API key, openly-licensed /
+# educational), applies the user's picture_mode policy, and returns results to
+# the kid Notepad. Because the PC only talks to the Pi, picture search keeps
+# working even when the kid browser blocks the open web. Cached to protect the
+# Pi at 50+ users.
+import time
+import json as _json
+import urllib.request as _urlreq
+import urllib.parse as _urlparse
+
+_PIC_CACHE = {}          # query -> (timestamp, results)
+_PIC_CACHE_TTL = 1800    # 30 min
+_PIC_MAX = 12            # results per search (keeps the Pi light)
+
+
+def _openverse_search(query):
+    url = ("https://api.openverse.org/v1/images/?q="
+           + _urlparse.quote(query)
+           + f"&page_size={_PIC_MAX}&mature=false&license_type=all")
+    req = _urlreq.Request(url, headers={"User-Agent": "FleetPanel/1.0"})
+    with _urlreq.urlopen(req, timeout=15) as r:
+        data = _json.loads(r.read())
+    out = []
+    for item in data.get("results", [])[:_PIC_MAX]:
+        out.append({
+            "title": item.get("title", "")[:120],
+            "thumbnail": item.get("thumbnail") or item.get("url"),
+            "url": item.get("url"),
+            "source": item.get("source", ""),
+        })
+    return out
+
+
+@app.route("/api/pictures/<username>", methods=["GET"])
+def api_pictures(username):
+    """Policy-filtered image search for the kid Notepad."""
+    _agent_auth()
+    user = models.get_user_by_name(username)
+    if not user:
+        abort(404)
+    query = (request.args.get("q") or "").strip()
+    if not query:
+        return jsonify({"results": [], "message": "Type something to search for."})
+
+    # picture_mode policy: is this search term allowed at all?
+    pic_policy = models.effective_policies(user["id"]).get("picture_mode", "")
+    if not pol.is_allowed(pic_policy, query):
+        return jsonify({"results": [],
+                        "message": "That search isn't allowed. Try something else! 🙂"})
+
+    # cache
+    key = query.lower()
+    now = time.time()
+    if key in _PIC_CACHE and now - _PIC_CACHE[key][0] < _PIC_CACHE_TTL:
+        return jsonify({"results": _PIC_CACHE[key][1], "cached": True})
+    try:
+        results = _openverse_search(query)
+    except Exception as e:
+        return jsonify({"results": [], "message": f"Search is busy, try again. ({e})"}), 200
+    _PIC_CACHE[key] = (now, results)
+    # keep cache from growing unbounded on a small board
+    if len(_PIC_CACHE) > 200:
+        oldest = sorted(_PIC_CACHE.items(), key=lambda kv: kv[1][0])[:50]
+        for k, _ in oldest:
+            _PIC_CACHE.pop(k, None)
+    return jsonify({"results": results})
+
+
+# ============================================================= COLLABORATION
+# Simple room-code collaboration for the kid Notepad / PowerPoint. A room is a
+# shared document kept in memory on the Pi. Clients poll to pull and push a full
+# document body with a version number (last-write-wins by version). Light enough
+# for text + simple slides at classroom scale.
+_ROOMS = {}   # code -> {"content": str, "version": int, "updated": ts, "kind": "note"|"ppt"}
+_ROOM_MAX = 300
+_ROOM_IDLE = 6 * 3600   # drop rooms idle > 6h
+
+
+def _gc_rooms():
+    now = time.time()
+    stale = [c for c, r in _ROOMS.items() if now - r["updated"] > _ROOM_IDLE]
+    for c in stale:
+        _ROOMS.pop(c, None)
+    if len(_ROOMS) > _ROOM_MAX:
+        for c, _ in sorted(_ROOMS.items(), key=lambda kv: kv[1]["updated"])[:50]:
+            _ROOMS.pop(c, None)
+
+
+@app.route("/api/room/<code>", methods=["GET"])
+def api_room_get(code):
+    """Pull the current room content + version."""
+    _agent_auth()
+    code = code.strip().upper()[:12]
+    r = _ROOMS.get(code)
+    if not r:
+        return jsonify({"exists": False, "content": "", "version": 0})
+    return jsonify({"exists": True, "content": r["content"],
+                    "version": r["version"], "kind": r.get("kind", "note")})
+
+
+@app.route("/api/room/<code>", methods=["POST"])
+def api_room_post(code):
+    """Push new content to a room. Creates it if needed. Last-write-wins by
+    version: the server only accepts an update whose base_version matches the
+    current version, else it returns the latest so the client can merge/retry."""
+    _agent_auth()
+    _gc_rooms()
+    code = code.strip().upper()[:12]
+    data = request.get_json(force=True, silent=True) or {}
+    content = data.get("content", "")
+    base = int(data.get("base_version", 0))
+    kind = data.get("kind", "note")
+    if len(content) > 400_000:   # ~400 KB cap per room, protects the Pi
+        return jsonify({"ok": False, "message": "Document too large."}), 200
+    r = _ROOMS.get(code)
+    if not r:
+        _ROOMS[code] = {"content": content, "version": 1,
+                        "updated": time.time(), "kind": kind}
+        return jsonify({"ok": True, "version": 1})
+    if base != r["version"]:
+        # someone else saved first — return latest so client can reconcile
+        return jsonify({"ok": False, "conflict": True,
+                        "content": r["content"], "version": r["version"]})
+    r["content"] = content
+    r["version"] += 1
+    r["updated"] = time.time()
+    return jsonify({"ok": True, "version": r["version"]})
 
 
 # ---- roaming data sync (very simple last-write-wins per relpath) --------------
