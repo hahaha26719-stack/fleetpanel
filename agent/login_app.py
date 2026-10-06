@@ -194,18 +194,49 @@ class FleetLogin(tk.Tk):
             self.after(0, lambda: self.show_login(f"Session error: {e}", is_error=True))
             return
 
-        # The watchdog and desktop launch are NON-CRITICAL: a failure here must
-        # NOT stall the login. Each is isolated so we always reach the session.
+        # Non-critical setup — never let these stall the login.
+        try:
+            agent.backup_hosts()                      # pristine hosts for later restore
+        except Exception as e:
+            print(f"[agent] hosts backup skipped: {e}")
+        try:
+            agent.write_kid_session(self.cfg, self.token, info)  # for the kid apps
+        except Exception as e:
+            print(f"[agent] kid session write failed: {e}")
         try:
             agent.start_watchdog(info, interval=30)
         except Exception as e:
             print(f"[agent] watchdog failed to start (continuing): {e}")
         try:
-            agent.launch_desktop()
+            self._launch_launcher()                   # the kid launcher (not Explorer)
         except Exception as e:
-            print(f"[agent] desktop launch failed (continuing): {e}")
+            print(f"[agent] launcher failed (continuing): {e}")
 
         self.after(0, lambda: self.show_session(info))
+
+    def _launch_launcher(self):
+        """Open the kid launcher and watch for its sign-out flag."""
+        import subprocess
+        here = os.path.dirname(os.path.abspath(__file__))
+        launcher = os.path.join(here, "launcher.py")
+        args = [sys.executable, launcher]
+        if WINDOWED:
+            args.append("--windowed")
+        self._launcher_proc = subprocess.Popen(args, cwd=here)
+        self._watch_signout()
+
+    def _watch_signout(self):
+        """Poll for the launcher's signout.flag; when it appears, log out."""
+        here = os.path.dirname(os.path.abspath(__file__))
+        flag = os.path.join(here, "signout.flag")
+        if os.path.exists(flag):
+            try:
+                os.remove(flag)
+            except Exception:
+                pass
+            self.on_logout()
+            return
+        self.after(1000, self._watch_signout)
 
     # ----------------------------------------------------------- session screen
     def show_session(self, info):
@@ -253,12 +284,19 @@ class FleetLogin(tk.Tk):
     def _do_logout(self):
         try:
             agent.stop_watchdog()   # stop re-applying this user's policies
-            agent.end_session(self.cfg, self.token, self.info)
-            agent.close_desktop()   # close the user's apps/desktop for a clean handoff
+            agent.end_session(self.cfg, self.token, self.info)  # push files + revert policies
+            agent.clear_kid_session()
         except Exception as e:
             self.after(0, lambda: self.status.config(text=f"Logout error: {e}", fg=ERR))
             return
-        self.after(0, self._back_to_login)
+        # Sign-out => REBOOT. On next boot, startup_cleanup() restores hosts and
+        # wipes local data for a clean slate. (In windowed test mode we skip the
+        # reboot and just return to the login screen.)
+        if WINDOWED:
+            self.after(0, self._back_to_login)
+        else:
+            self.after(0, lambda: self.status.config(text="Signing out and restarting…"))
+            agent.reboot()
 
     def _back_to_login(self):
         # restore the full-screen login for the next user
@@ -274,6 +312,11 @@ class FleetLogin(tk.Tk):
 
 def build():
     cfg = agent.load_config()
+    # Boot-time clean slate: restore hosts from backup + wipe local user data.
+    try:
+        agent.startup_cleanup()
+    except Exception as e:
+        print(f"[agent] startup cleanup skipped: {e}")
     token = agent.enroll(cfg)
     return FleetLogin(cfg, token)
 

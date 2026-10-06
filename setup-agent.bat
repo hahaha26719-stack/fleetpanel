@@ -33,8 +33,17 @@ set "DEST=C:\FleetAgent"
 echo [1/5] Creating %DEST% ...
 if not exist "%DEST%" mkdir "%DEST%"
 
-echo [2/5] Copying agent files ...
-copy /Y "%~dp0agent\agent.py" "%DEST%\agent.py" >nul
+echo [2/5] Copying agent + kid app files ...
+copy /Y "%~dp0agent\agent.py"       "%DEST%\agent.py" >nul
+copy /Y "%~dp0agent\login_app.py"   "%DEST%\login_app.py" >nul
+copy /Y "%~dp0agent\kidcommon.py"   "%DEST%\kidcommon.py" >nul
+copy /Y "%~dp0agent\launcher.py"    "%DEST%\launcher.py" >nul
+copy /Y "%~dp0agent\kidnotepad.py"  "%DEST%\kidnotepad.py" >nul
+copy /Y "%~dp0agent\kidppt.py"      "%DEST%\kidppt.py" >nul
+copy /Y "%~dp0agent\kidbrowser.py"  "%DEST%\kidbrowser.py" >nul
+
+echo     Installing the browser engine (pywebview, uses Windows WebView2) ...
+python -m pip install --quiet pywebview 2>nul || echo [WARN] pip/pywebview not installed - the browser needs it; install Python + 'pip install pywebview'.
 
 echo [3/5] Writing config ...
 > "%DEST%\agent_config.json" (

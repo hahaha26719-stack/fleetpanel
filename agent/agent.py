@@ -405,6 +405,97 @@ def end_session(cfg, token, info):
     revert_policies(info["policies"], info["catalog"])
 
 
+def write_kid_session(cfg, token, info):
+    """Write kid_session.json next to the apps so the launcher/notepad/ppt/
+    browser can talk to the Pi and read this user's policies."""
+    data = {
+        "server": cfg["server"],
+        "token": token,
+        "username": info["username"],
+        "display_name": info.get("display_name", info["username"]),
+        "policies": info.get("policies", {}),
+    }
+    with open(os.path.join(HERE, "kid_session.json"), "w", encoding="utf-8") as f:
+        json.dump(data, f)
+
+
+def clear_kid_session():
+    for name in ("kid_session.json", "signout.flag"):
+        try:
+            os.remove(os.path.join(HERE, name))
+        except FileNotFoundError:
+            pass
+
+
+# ---- hosts backup / restore + local wipe + reboot ---------------------------
+HOSTS_BACKUP = os.path.join(HERE, "hosts.backup")
+
+
+def backup_hosts():
+    """Save a pristine copy of the hosts file ONCE, so we can restore it later.
+    Won't overwrite an existing backup (so a tampered hosts never becomes the
+    'clean' baseline)."""
+    if not IS_WINDOWS:
+        print("[dry-run] backup hosts -> hosts.backup")
+        return
+    if os.path.exists(HOSTS_BACKUP):
+        return
+    try:
+        with open(HOSTS_PATH, "r", encoding="utf-8", errors="ignore") as src:
+            data = src.read()
+        with open(HOSTS_BACKUP, "w", encoding="utf-8") as dst:
+            dst.write(data)
+    except Exception as e:
+        print(f"[agent] hosts backup failed: {e}")
+
+
+def restore_hosts():
+    """Restore the hosts file from the pristine backup (undo any blocks)."""
+    if not IS_WINDOWS:
+        print("[dry-run] restore hosts from hosts.backup")
+        return
+    if not os.path.exists(HOSTS_BACKUP):
+        return
+    try:
+        with open(HOSTS_BACKUP, "r", encoding="utf-8") as src:
+            data = src.read()
+        with open(HOSTS_PATH, "w", encoding="utf-8") as dst:
+            dst.write(data)
+        subprocess.run("ipconfig /flushdns", shell=True, check=False)
+    except Exception as e:
+        print(f"[agent] hosts restore failed: {e}")
+
+
+def wipe_local_user_data():
+    """Delete this PC's local copy of roaming files + the kid user files. The
+    MASTER copy lives on the Pi, so nothing is truly lost — it re-syncs on the
+    next login. Called at startup so each boot starts clean."""
+    import shutil
+    for sub in ("roaming", "userfiles"):
+        d = os.path.join(HERE, sub)
+        try:
+            if os.path.isdir(d):
+                shutil.rmtree(d)
+        except Exception as e:
+            print(f"[agent] could not wipe {sub}: {e}")
+    clear_kid_session()
+
+
+def startup_cleanup():
+    """Run at PC startup (before the login screen): restore hosts from backup
+    and wipe local user data so every boot is a clean slate."""
+    restore_hosts()
+    wipe_local_user_data()
+
+
+def reboot():
+    """Reboot the PC (used on sign-out)."""
+    if not IS_WINDOWS:
+        print("[dry-run] shutdown /r /t 3")
+        return
+    subprocess.run("shutdown /r /t 3 /c \"FleetPanel: signing out\"", shell=True, check=False)
+
+
 def launch_desktop():
     """Start the Windows desktop (Explorer) so the user has a normal session
     after logging into FleetPanel. If Explorer is already running this is a
