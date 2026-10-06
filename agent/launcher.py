@@ -17,7 +17,20 @@ import kidcommon as kc
 
 WINDOWED = "--windowed" in sys.argv
 HERE = os.path.dirname(os.path.abspath(__file__))
-PY = sys.executable  # same python to launch child apps
+
+
+def _pythonw():
+    """Prefer pythonw.exe so child apps have NO closable console window.
+    Falls back to the normal interpreter if pythonw isn't found."""
+    exe = sys.executable
+    if exe.lower().endswith("python.exe"):
+        cand = exe[:-len("python.exe")] + "pythonw.exe"
+        if os.path.exists(cand):
+            return cand
+    return exe
+
+
+PY = _pythonw()  # launch child apps windowless
 
 # app key -> (nice name, emoji, colour, script)
 APPS = [
@@ -37,7 +50,26 @@ class Launcher(tk.Tk):
             self.geometry("1000x680")
         else:
             self.attributes("-fullscreen", True)
+            self.attributes("-topmost", True)
         self.bind("<Escape>", lambda e: self.destroy() if WINDOWED else None)
+
+        # ---- KIOSK LOCK: the kid cannot close the launcher ------------------
+        # Block the window-close (X) / Alt+F4. The ONLY way out is the big
+        # "Sign out" button (which reboots) or the admin escape hatch
+        # (Ctrl+Alt+Q) handled by login_app. In windowed TEST mode we allow
+        # closing so you don't trap yourself while testing.
+        if not WINDOWED:
+            self.protocol("WM_DELETE_WINDOW", self._blocked_close)
+            self.bind_all("<Alt-F4>", lambda e: "break")
+            self.bind_all("<Control-w>", lambda e: "break")
+            self.bind_all("<Control-q>", lambda e: "break")
+
+    def _blocked_close(self):
+        # ignore attempts to close; nudge toward the Sign out button
+        try:
+            self.bell()
+        except Exception:
+            pass
 
         name = session.get("display_name") or session.get("username", "friend")
         tk.Label(self, text=f"Hi {name}! 👋", bg=kc.BG, fg=kc.INK,

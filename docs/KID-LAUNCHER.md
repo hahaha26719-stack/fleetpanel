@@ -59,6 +59,23 @@ Boot → startup_cleanup(): restore hosts from backup + wipe local user data
 get the new apps, or copy the `kid*.py` + `launcher.py` + `login_app.py` files
 into `C:\FleetAgent` and `pip install pywebview`.
 
+## The kid cannot escape (kiosk lock)
+
+- The **login app** and **launcher** block the window-close (X), **Alt+F4**, and
+  Ctrl+W/Ctrl+Q — the kid can't close them to reach the desktop.
+- Child apps are launched with **`pythonw.exe`** so there is **no console
+  window** to close and kill them.
+- If the launcher process is somehow killed, the login app **relaunches it
+  automatically** (every ~1.5s) while the session is active.
+- The **only** ways out are: the big **Sign out** button (which reboots), or the
+  **admin-only Ctrl+Alt+Q** (requires a FleetPanel admin password).
+- Always launch the login app with `pythonw.exe` (not `python.exe`) in
+  production so there's no console window at all. The Startup entry in
+  `LOGIN-APP.md` already uses `pythonw`.
+
+> In `--windowed` TEST mode these locks are DISABLED so you can close things
+> while testing and not trap yourself.
+
 ## Testing safely
 
 Run any app windowed, no kiosk, no reboot:

@@ -62,10 +62,19 @@ class FleetLogin(tk.Tk):
             self.attributes("-topmost", True)
         self.bind("<Escape>", lambda e: self.destroy() if WINDOWED else None)
 
-        # ---- ESCAPE HATCH (always available, even full-screen) --------------
-        # Ctrl+Alt+Q: emergency exit — closes the login app and opens the
-        # desktop so an admin can always get in. This is your safety net so the
-        # kiosk can never fully trap you. (Ctrl+Alt+Del also always works.)
+        # ---- KIOSK LOCK: the kid cannot close the login app ----------------
+        # Block the window-close (X) / Alt+F4 / Ctrl+W so a kid can't quit out
+        # to the desktop. The ONLY exits are: signing out (reboots), or the
+        # admin escape hatch below. Allowed in windowed TEST mode.
+        if not WINDOWED:
+            self.protocol("WM_DELETE_WINDOW", lambda: self.bell())
+            self.bind_all("<Alt-F4>", lambda e: "break")
+            self.bind_all("<Control-w>", lambda e: "break")
+
+        # ---- ESCAPE HATCH (ADMIN ONLY, always available) -------------------
+        # Ctrl+Alt+Q: prompts for a FleetPanel ADMIN password; only then does it
+        # unlock to the desktop. This is the admin's safety net so the kiosk can
+        # never permanently trap you. (Ctrl+Alt+Del also always works.)
         self.bind_all("<Control-Alt-q>", self._escape_hatch)
         self.bind_all("<Control-Alt-Q>", self._escape_hatch)
 
@@ -214,16 +223,49 @@ class FleetLogin(tk.Tk):
 
         self.after(0, lambda: self.show_session(info))
 
+    def _launcher_exe(self):
+        """Use pythonw.exe (no console window) so there's no console to close."""
+        exe = sys.executable
+        if exe.lower().endswith("python.exe"):
+            cand = exe[:-len("python.exe")] + "pythonw.exe"
+            if os.path.exists(cand):
+                return cand
+        return exe
+
     def _launch_launcher(self):
-        """Open the kid launcher and watch for its sign-out flag."""
+        """Open the kid launcher, keep it alive (relaunch if killed), and watch
+        for its sign-out flag."""
         import subprocess
         here = os.path.dirname(os.path.abspath(__file__))
         launcher = os.path.join(here, "launcher.py")
-        args = [sys.executable, launcher]
+        args = [self._launcher_exe(), launcher]
         if WINDOWED:
             args.append("--windowed")
+        self._launcher_args = args
+        self._launcher_cwd = here
+        self._session_active = True
         self._launcher_proc = subprocess.Popen(args, cwd=here)
+        self._watch_launcher()
         self._watch_signout()
+
+    def _watch_launcher(self):
+        """If the launcher process dies while the session is active (and the kid
+        hasn't signed out), relaunch it — so a kid can't kill it to escape."""
+        if not getattr(self, "_session_active", False) or WINDOWED:
+            return
+        import subprocess, os as _os
+        here = os.path.dirname(os.path.abspath(__file__))
+        if os.path.exists(os.path.join(here, "signout.flag")):
+            return  # signing out; let it go
+        proc = getattr(self, "_launcher_proc", None)
+        if proc is not None and proc.poll() is not None:
+            # it exited unexpectedly -> bring it back
+            try:
+                self._launcher_proc = subprocess.Popen(self._launcher_args,
+                                                       cwd=self._launcher_cwd)
+            except Exception as e:
+                print(f"[agent] could not relaunch launcher: {e}")
+        self.after(1500, self._watch_launcher)
 
     def _watch_signout(self):
         """Poll for the launcher's signout.flag; when it appears, log out."""
@@ -283,6 +325,7 @@ class FleetLogin(tk.Tk):
 
     def _do_logout(self):
         try:
+            self._session_active = False   # stop the launcher relaunch-watchdog
             agent.stop_watchdog()   # stop re-applying this user's policies
             agent.end_session(self.cfg, self.token, self.info)  # push files + revert policies
             agent.clear_kid_session()
