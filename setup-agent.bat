@@ -53,22 +53,49 @@ echo [3/5] Writing config ...
     echo }
 )
 
-echo [4/5] Registering logon task (runs as SYSTEM, highest privileges) ...
-REM Requires Python installed, OR replace with the frozen FleetAgent.exe path.
-set "PY=python"
-where %PY% >nul 2>&1 || set "PY=py"
-schtasks /Create /TN "FleetAgent" /RU "SYSTEM" /RL HIGHEST /SC ONLOGON /F ^
-  /TR "\"%PY%\" \"%DEST%\agent.py\"" >nul
-if %errorLevel% neq 0 ( echo [WARN] Task creation failed - is Python installed? )
+echo [4/5] Registering logon task (SYSTEM, highest privileges, works on battery) ...
+REM Find pythonw.exe (no console window) so there's nothing for a kid to close.
+set "PYW=pythonw"
+where pythonw >nul 2>&1 || set "PYW=python"
 
-REM Also push roaming data back at logoff.
-schtasks /Create /TN "FleetAgent-Logoff" /RU "SYSTEM" /RL HIGHEST /SC ONEVENT /F ^
-  /EC Security /MO "*[System[(EventID=4647)]]" ^
-  /TR "\"%PY%\" \"%DEST%\agent.py\" --logoff" >nul 2>&1
+REM Build the task from an XML definition so we can DISABLE the battery
+REM conditions (DisallowStartIfOnBatteries / StopIfGoingOnBatteries) — the
+REM default would stop it running on laptops ("no start on battery").
+set "TASKXML=%DEST%\fleetagent_task.xml"
+> "%TASKXML%" (
+    echo ^<?xml version="1.0" encoding="UTF-16"?^>
+    echo ^<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"^>
+    echo   ^<RegistrationInfo^>^<Description^>FleetPanel login app^</Description^>^</RegistrationInfo^>
+    echo   ^<Triggers^>^<LogonTrigger^>^<Enabled^>true^</Enabled^>^</LogonTrigger^>^</Triggers^>
+    echo   ^<Principals^>^<Principal id="Author"^>
+    echo     ^<UserId^>S-1-5-18^</UserId^>^<RunLevel^>HighestAvailable^</RunLevel^>
+    echo   ^</Principal^>^</Principals^>
+    echo   ^<Settings^>
+    echo     ^<DisallowStartIfOnBatteries^>false^</DisallowStartIfOnBatteries^>
+    echo     ^<StopIfGoingOnBatteries^>false^</StopIfGoingOnBatteries^>
+    echo     ^<AllowHardTerminate^>true^</AllowHardTerminate^>
+    echo     ^<StartWhenAvailable^>true^</StartWhenAvailable^>
+    echo     ^<ExecutionTimeLimit^>PT0S^</ExecutionTimeLimit^>
+    echo     ^<MultipleInstancesPolicy^>IgnoreNew^</MultipleInstancesPolicy^>
+    echo   ^</Settings^>
+    echo   ^<Actions Context="Author"^>
+    echo     ^<Exec^>^<Command^>%PYW%^</Command^>^<Arguments^>"%DEST%\login_app.py"^</Arguments^>^</Exec^>
+    echo   ^</Actions^>
+    echo ^</Task^>
+)
+schtasks /Create /TN "FleetAgent" /XML "%TASKXML%" /F >nul
+if %errorLevel% neq 0 ( echo [WARN] Task creation failed - is Python installed and on PATH? )
 
-echo [5/5] Locking down the agent folder (standard users: read/execute only) ...
+echo [5/5] Setting folder permissions ...
+REM Lock the CODE so standard users can't modify the agent/apps, BUT let users
+REM WRITE their own data folders so sign-in sync + reboot-wipe work.
 icacls "%DEST%" /inheritance:r >nul
 icacls "%DEST%" /grant:r "SYSTEM:(OI)(CI)F" "Administrators:(OI)(CI)F" "Users:(OI)(CI)RX" >nul
+if not exist "%DEST%\roaming"   mkdir "%DEST%\roaming"
+if not exist "%DEST%\userfiles" mkdir "%DEST%\userfiles"
+REM Give Users full control of just the data dirs (so they can be written + wiped).
+icacls "%DEST%\roaming"   /grant:r "Users:(OI)(CI)F" >nul
+icacls "%DEST%\userfiles" /grant:r "Users:(OI)(CI)F" >nul
 
 echo.
 echo ============================================================
