@@ -469,15 +469,50 @@ def restore_hosts():
 def wipe_local_user_data():
     """Delete this PC's local copy of roaming files + the kid user files. The
     MASTER copy lives on the Pi, so nothing is truly lost — it re-syncs on the
-    next login. Called at startup so each boot starts clean."""
-    import shutil
+    next login. Called at startup so each boot starts clean.
+
+    Robust against locked / read-only / permissioned files: it clears read-only
+    flags, ignores files still in use, and deletes contents individually so one
+    stubborn file can't block the whole wipe."""
+    import shutil, stat
+
+    def _on_rm_error(func, path, exc_info):
+        # clear read-only and retry; otherwise skip quietly
+        try:
+            os.chmod(path, stat.S_IWRITE)
+            func(path)
+        except Exception:
+            pass
+
     for sub in ("roaming", "userfiles"):
         d = os.path.join(HERE, sub)
+        if not os.path.isdir(d):
+            continue
+        # First try to remove the whole tree, tolerating errors.
         try:
-            if os.path.isdir(d):
-                shutil.rmtree(d)
+            shutil.rmtree(d, onerror=_on_rm_error)
         except Exception as e:
-            print(f"[agent] could not wipe {sub}: {e}")
+            print(f"[agent] rmtree {sub} had issues: {e}")
+        # If anything survived (locked files), delete what we can file-by-file
+        # so the folder is emptied as much as possible.
+        if os.path.isdir(d):
+            for root, dirs, files in os.walk(d, topdown=False):
+                for name in files:
+                    fp = os.path.join(root, name)
+                    try:
+                        os.chmod(fp, stat.S_IWRITE)
+                        os.remove(fp)
+                    except Exception as e:
+                        print(f"[agent] could not delete {fp}: {e}")
+                for name in dirs:
+                    try:
+                        os.rmdir(os.path.join(root, name))
+                    except Exception:
+                        pass
+            try:
+                os.rmdir(d)
+            except Exception:
+                pass
     clear_kid_session()
 
 
