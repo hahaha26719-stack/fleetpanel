@@ -14,7 +14,7 @@ REM   * Only touches the named user's hive (HKU), NEVER machine-wide, so your
 REM     admin account keeps the normal Windows desktop.
 REM   * Keep a backup admin account and the Ctrl+Alt+Q escape hatch ready.
 REM ===================================================================
-setlocal EnableDelayedExpansion
+setlocal
 
 net session >nul 2>&1
 if %errorLevel% neq 0 ( echo [ERROR] Run this as Administrator. & pause & exit /b 1 )
@@ -31,10 +31,9 @@ if /i "%ACTION%"=="help" (
     exit /b 0
 )
 
-REM --- get the kiosk user's SID so we can edit their hive precisely ---
+REM --- get the kiosk user's SID (PowerShell, since wmic is removed on Win11) ---
 set "SID="
-for /f "tokens=1,* delims==" %%A in ('wmic useraccount where "name='%KUSER%'" get sid /value ^| find "SID"') do set "SID=%%B"
-set "SID=%SID: =%"
+for /f "usebackq delims=" %%A in (`powershell -NoProfile -Command "(New-Object System.Security.Principal.NTAccount('%KUSER%')).Translate([System.Security.Principal.SecurityIdentifier]).Value" 2^>nul`) do set "SID=%%A"
 if "%SID%"=="" ( echo [ERROR] Could not find user '%KUSER%'. Create it first. & exit /b 1 )
 echo User '%KUSER%' SID = %SID%
 
