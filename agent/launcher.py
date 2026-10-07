@@ -126,22 +126,26 @@ class Launcher(tk.Tk):
         self._watch_child(proc)
 
     def _step_aside(self):
+        # Stay FULL-SCREEN as the backdrop (do NOT minimize) — just drop
+        # topmost so the app can come to the front. If the kid minimizes or
+        # closes the app, they see the launcher behind it, never the desktop.
         try:
             if not WINDOWED:
                 self.attributes("-topmost", False)
-                self.attributes("-fullscreen", False)
-            self.iconify()   # minimize to taskbar
+                # keep fullscreen True — this is the whole point
         except Exception:
             pass
 
     def _come_back(self):
         try:
-            self.deiconify()
             if not WINDOWED:
                 self.attributes("-fullscreen", True)
                 self.attributes("-topmost", True)
             self.lift()
             self.focus_force()
+            # drop topmost again shortly so future app windows can sit on top
+            if not WINDOWED:
+                self.after(400, lambda: self.attributes("-topmost", False))
         except Exception:
             pass
 

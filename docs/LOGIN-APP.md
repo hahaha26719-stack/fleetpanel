@@ -116,3 +116,39 @@ Boot → auto-login kiosk account → login_app.py (full screen)
      → agent pushes data back + reverts per-user policies
      → back to the login screen for the next user
 ```
+
+
+## Removing the desktop/taskbar entirely (true kiosk — no "open desktop")
+
+By default Windows runs **Explorer** (the desktop + taskbar) under everything.
+If a kid minimizes or closes an app, Explorer shows through. Two layers prevent
+that:
+
+### Layer 1 — launcher as a full-screen backdrop (built in)
+The launcher stays **full-screen behind the apps** instead of minimizing. If an
+app is minimized or closed, the kid sees the **launcher**, not the desktop. This
+is automatic — no setup needed.
+
+### Layer 2 — replace the Windows shell (removes the taskbar/desktop completely)
+For the **kiosk user only**, make the FleetPanel login app the Windows *shell*
+so Explorer never runs — there is no taskbar or desktop to reveal at all.
+
+Set this **under the kiosk user's HKCU** (NOT machine-wide, or you'll remove the
+desktop for admins too):
+
+```reg
+Windows Registry Editor Version 5.00
+[HKEY_CURRENT_USER\Software\Microsoft\Windows NT\CurrentVersion\Winlogon]
+"Shell"="pythonw C:\\FleetAgent\\login_app.py"
+```
+
+Apply it while logged in AS the kiosk user, or load that user's hive. After this,
+when the kiosk user logs in, **only** the FleetPanel login/launcher/apps run —
+no Explorer, no taskbar, no Start menu, nothing to minimize to.
+
+> ⚠️ Do this ONLY for the kiosk account. Your admin account must keep the normal
+> Explorer shell. Test with Layer 1 first; add Layer 2 once you're confident, and
+> keep your backup admin + Ctrl+Alt+Q escape hatch ready.
+
+To undo (as admin): delete that `Shell` value from the kiosk user's hive, or set
+it back to `explorer.exe`.
