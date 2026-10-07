@@ -26,6 +26,7 @@ Run:  python login_app.py         (kiosk/full-screen)
       python login_app.py --windowed   (for testing on a normal desktop)
 """
 
+import os
 import sys
 import threading
 import tkinter as tk
@@ -253,7 +254,7 @@ class FleetLogin(tk.Tk):
         hasn't signed out), relaunch it — so a kid can't kill it to escape."""
         if not getattr(self, "_session_active", False) or WINDOWED:
             return
-        import subprocess, os as _os
+        import subprocess
         here = os.path.dirname(os.path.abspath(__file__))
         if os.path.exists(os.path.join(here, "signout.flag")):
             return  # signing out; let it go
