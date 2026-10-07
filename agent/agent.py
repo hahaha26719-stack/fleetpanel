@@ -85,7 +85,7 @@ def _request(cfg, method, path, token=None, json_body=None, raw=None, headers=No
         hdrs["X-Agent-Token"] = token
     req = urllib.request.Request(url, data=data, method=method, headers=hdrs)
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
+        with urllib.request.urlopen(req, timeout=10) as r:
             body = r.read()
             return r.status, body
     except urllib.error.HTTPError as e:

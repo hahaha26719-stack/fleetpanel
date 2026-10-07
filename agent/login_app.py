@@ -90,8 +90,26 @@ class FleetLogin(tk.Tk):
         self.container = tk.Frame(outer, bg=BG)
         self.container.place(relx=0.5, rely=0.5, anchor="center")
         self.show_login()
-        # Force an initial draw so the window never shows blank.
+        # Force an initial draw so the window appears INSTANTLY (no desktop peek).
         self.update_idletasks()
+
+        # Do the slow startup work (hosts restore + wipe + enrollment) in the
+        # BACKGROUND so the login screen is usable immediately even if the Pi is
+        # slow to reach at boot. self.token fills in when enrollment completes.
+        self._enroll_done = threading.Event()
+        threading.Thread(target=self._background_startup, daemon=True).start()
+
+    def _background_startup(self):
+        try:
+            agent.startup_cleanup()
+        except Exception as e:
+            print(f"[agent] startup cleanup skipped: {e}")
+        try:
+            self.token = agent.enroll(self.cfg)
+        except Exception as e:
+            print(f"[agent] enroll failed (will retry on login): {e}")
+            self.token = ""
+        self._enroll_done.set()
 
     def _escape_hatch(self, event=None):
         """ADMIN-ONLY emergency exit (Ctrl+Alt+Q). Prompts for a FleetPanel
@@ -186,6 +204,19 @@ class FleetLogin(tk.Tk):
         threading.Thread(target=self._do_login, args=(username, password), daemon=True).start()
 
     def _do_login(self, username, password):
+        # Make sure enrollment has finished (it runs in the background at
+        # startup). Wait up to ~20s; if the token still isn't there, try once
+        # more now so the kid gets a clear result instead of a silent failure.
+        self._enroll_done.wait(timeout=20)
+        if not self.token:
+            try:
+                self.token = agent.enroll(self.cfg)
+            except Exception:
+                self.token = ""
+        if not self.token:
+            self.after(0, lambda: self.show_login(
+                "Can't reach the server. Please tell your teacher.", is_error=True))
+            return
         info = agent.authenticate(self.cfg, self.token, username, password)
         if not info:
             self.after(0, lambda: self.show_login("Invalid username or password.", is_error=True))
@@ -360,13 +391,10 @@ class FleetLogin(tk.Tk):
 
 def build():
     cfg = agent.load_config()
-    # Boot-time clean slate: restore hosts from backup + wipe local user data.
-    try:
-        agent.startup_cleanup()
-    except Exception as e:
-        print(f"[agent] startup cleanup skipped: {e}")
-    token = agent.enroll(cfg)
-    return FleetLogin(cfg, token)
+    # Show the window IMMEDIATELY (token comes in the background) so the desktop
+    # never shows and there's no ~1 min wait if the network/Pi is slow at boot.
+    win = FleetLogin(cfg, token="")
+    return win
 
 
 if __name__ == "__main__":
