@@ -46,31 +46,40 @@ REM --- the user's hive: loaded live as HKU\<SID>, or load from NTUSER.DAT ---
 set "HIVE=HKU\%SID%"
 set "LOADED=0"
 reg query "%HIVE%" >nul 2>&1
-if %errorLevel% neq 0 (
-    REM user not logged in -> load their NTUSER.DAT temporarily
-    set "PROFPATH="
-    for /f "tokens=2,*" %%A in ('reg query "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\%SID%" /v ProfileImagePath 2^>nul ^| find "ProfileImagePath"') do set "PROFPATH=%%B"
-    if "!PROFPATH!"=="" ( echo [ERROR] Could not find profile path for %KUSER%. & exit /b 1 )
-    set "HIVE=HKU\FleetKiosk"
-    reg load "!HIVE!" "!PROFPATH!\NTUSER.DAT" >nul 2>&1
-    if !errorLevel! neq 0 ( echo [ERROR] Could not load the user's hive (are they logged in?). & exit /b 1 )
-    set "LOADED=1"
-)
+if %errorLevel% neq 0 goto loadhive
+goto havehive
 
+:loadhive
+REM user not logged in -> load their NTUSER.DAT temporarily
+set "PROFPATH="
+for /f "tokens=2,*" %%A in ('reg query "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\%SID%" /v ProfileImagePath 2^>nul ^| find "ProfileImagePath"') do set "PROFPATH=%%B"
+if not defined PROFPATH ( echo [ERROR] Could not find profile path for %KUSER%. & exit /b 1 )
+set "HIVE=HKU\FleetKiosk"
+reg load "%HIVE%" "%PROFPATH%\NTUSER.DAT" >nul 2>&1
+if errorlevel 1 ( echo [ERROR] Could not load the user's hive ^(are they logged in?^). & exit /b 1 )
+set "LOADED=1"
+
+:havehive
 set "KEY=%HIVE%\Software\Microsoft\Windows NT\CurrentVersion\Winlogon"
 
-if /i "%ACTION%"=="set" (
-    reg add "%KEY%" /v Shell /t REG_SZ /d "%SHELLCMD%" /f >nul
-    echo [OK] Kiosk shell SET for %KUSER%: %SHELLCMD%
-    echo      On next logon, %KUSER% gets NO desktop/taskbar - only FleetPanel.
-) else if /i "%ACTION%"=="unset" (
-    reg add "%KEY%" /v Shell /t REG_SZ /d "explorer.exe" /f >nul
-    echo [OK] Normal desktop RESTORED for %KUSER%.
-) else (
-    echo [ERROR] Unknown action '%ACTION%'. Use set or unset.
-)
+if /i "%ACTION%"=="set" goto do_set
+if /i "%ACTION%"=="unset" goto do_unset
+echo [ERROR] Unknown action '%ACTION%'. Use set or unset.
+goto cleanup
 
-if "%LOADED%"=="1" ( reg unload "%HIVE%" >nul 2>&1 )
+:do_set
+reg add "%KEY%" /v Shell /t REG_SZ /d "%SHELLCMD%" /f >nul
+echo [OK] Kiosk shell SET for %KUSER%: %SHELLCMD%
+echo      On next logon, %KUSER% gets NO desktop/taskbar - only FleetPanel.
+goto cleanup
+
+:do_unset
+reg add "%KEY%" /v Shell /t REG_SZ /d "explorer.exe" /f >nul
+echo [OK] Normal desktop RESTORED for %KUSER%.
+goto cleanup
+
+:cleanup
+if "%LOADED%"=="1" reg unload "%HIVE%" >nul 2>&1
 
 echo.
 echo Reminders:
