@@ -53,24 +53,6 @@ class Launcher(tk.Tk):
             self.attributes("-topmost", True)
         self.bind("<Escape>", lambda e: self.destroy() if WINDOWED else None)
 
-        # ---- KIOSK LOCK: the kid cannot close the launcher ------------------
-        # Block the window-close (X) / Alt+F4. The ONLY way out is the big
-        # "Sign out" button (which reboots) or the admin escape hatch
-        # (Ctrl+Alt+Q) handled by login_app. In windowed TEST mode we allow
-        # closing so you don't trap yourself while testing.
-        if not WINDOWED:
-            self.protocol("WM_DELETE_WINDOW", self._blocked_close)
-            self.bind_all("<Alt-F4>", lambda e: "break")
-            self.bind_all("<Control-w>", lambda e: "break")
-            self.bind_all("<Control-q>", lambda e: "break")
-
-    def _blocked_close(self):
-        # ignore attempts to close; nudge toward the Sign out button
-        try:
-            self.bell()
-        except Exception:
-            pass
-
         name = session.get("display_name") or session.get("username", "friend")
         tk.Label(self, text=f"Hi {name}! 👋", bg=kc.BG, fg=kc.INK,
                  font=(kc.FONT, 34, "bold")).pack(pady=(40, 6))
@@ -99,6 +81,23 @@ class Launcher(tk.Tk):
                         command=self.on_signout)
         kc.style_button(out)
         out.pack()
+
+        # ---- KIOSK LOCK (added LAST, after the UI is built) ----------------
+        # The kid cannot close the launcher. Only exits: the Sign out button
+        # (reboots) or the admin escape hatch (Ctrl+Alt+Q in login_app).
+        # Disabled in windowed TEST mode so you don't trap yourself.
+        if not WINDOWED:
+            self.protocol("WM_DELETE_WINDOW", self._blocked_close)
+            self.bind_all("<Alt-F4>", lambda e: "break")
+            self.bind_all("<Control-w>", lambda e: "break")
+            self.bind_all("<Control-q>", lambda e: "break")
+
+    def _blocked_close(self):
+        # ignore attempts to close; nudge toward the Sign out button
+        try:
+            self.bell()
+        except Exception:
+            pass
 
     def _tile(self, parent, label, emoji, colour, script):
         card = tk.Frame(parent, bg=colour, width=230, height=230,
