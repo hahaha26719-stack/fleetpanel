@@ -27,7 +27,7 @@ class KidSlides(tk.Tk):
         self.session = session
         self.title("Slides")
         self.configure(bg=kc.BG)
-        self.geometry("1000x700")
+        kc.maximize(self, windowed="--windowed" in sys.argv)
         self.slides = [{"title": "My First Slide", "body": "Type here!"}]
         self.index = 0
         self.current_file = None

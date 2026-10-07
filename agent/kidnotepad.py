@@ -27,7 +27,7 @@ class KidNotepad(tk.Tk):
         self.session = session
         self.title("Notepad")
         self.configure(bg=kc.BG)
-        self.geometry("980x680")
+        kc.maximize(self, windowed="--windowed" in sys.argv)
         self.current_file = None
 
         # collaboration state

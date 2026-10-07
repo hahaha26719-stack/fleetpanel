@@ -110,6 +110,23 @@ def signout_flag_path():
     return os.path.join(state_dir(), "signout.flag")
 
 
+def maximize(win, windowed=False):
+    """Make a kid app fill the screen (kiosk feel, no desktop peeking through).
+    In windowed/test mode, use a normal resizable window instead so you can
+    close it easily. Falls back gracefully across platforms."""
+    if windowed:
+        win.geometry("1000x700")
+        return
+    try:
+        win.state("zoomed")           # Windows: maximized
+    except Exception:
+        try:
+            win.attributes("-zoomed", True)   # some Linux WMs
+        except Exception:
+            # last resort: size to the screen
+            win.geometry(f"{win.winfo_screenwidth()}x{win.winfo_screenheight()}+0+0")
+
+
 def style_button(btn):
     """Apply the chunky kid style to a tk.Button."""
     btn.configure(relief="flat", bd=0, cursor="hand2",

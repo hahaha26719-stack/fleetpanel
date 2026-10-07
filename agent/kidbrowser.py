@@ -83,7 +83,10 @@ def run_browser(session):
     except Exception:
         pass
 
-    window = webview.create_window("My Web Browser", url=start, width=1100, height=760)
+    windowed = "--windowed" in sys.argv
+    window = webview.create_window("My Web Browser", url=start,
+                                   width=1100, height=760,
+                                   fullscreen=not windowed, maximized=not windowed)
 
     def on_navigating(url):
         # Block navigations that violate policy by redirecting to a friendly page.
