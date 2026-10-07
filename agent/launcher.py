@@ -123,7 +123,7 @@ class Launcher(tk.Tk):
         # Signal login_app (which launched us) to end the session. We write a
         # sentinel file it watches, then close. login_app handles reboot/cleanup.
         try:
-            open(os.path.join(HERE, "signout.flag"), "w").close()
+            open(kc.signout_flag_path(), "w").close()
         except Exception:
             pass
         self.destroy()

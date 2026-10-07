@@ -28,9 +28,25 @@ import urllib.request
 import urllib.error
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CONFIG_PATH = os.path.join(HERE, "agent_config.json")
-TOKEN_PATH = os.path.join(HERE, "device_token.json")
+CONFIG_PATH = os.path.join(HERE, "agent_config.json")  # read-only, read by all users
 IS_WINDOWS = os.name == "nt"
+
+
+def _state_dir():
+    """A per-user, WRITABLE directory for runtime files (device token, session,
+    flags, roaming, user files). C:\\FleetAgent itself is read-only for standard
+    users, and the GUI now runs AS THE USER, so all writable state lives here."""
+    base = os.environ.get("LOCALAPPDATA") or os.environ.get("TMP") or HERE
+    d = os.path.join(base, "FleetAgent")
+    try:
+        os.makedirs(d, exist_ok=True)
+    except Exception:
+        d = HERE
+    return d
+
+
+STATE_DIR = _state_dir()
+TOKEN_PATH = os.path.join(STATE_DIR, "device_token.json")
 
 if IS_WINDOWS:
     import winreg  # noqa
@@ -201,7 +217,7 @@ def apply_policies(policies, catalog):
 
 # ------------------------------------------------------------------- data roaming
 def roaming_dir(username):
-    d = os.path.join(HERE, "roaming", username)
+    d = os.path.join(STATE_DIR, "roaming", username)
     os.makedirs(d, exist_ok=True)
     return d
 
@@ -415,20 +431,20 @@ def write_kid_session(cfg, token, info):
         "display_name": info.get("display_name", info["username"]),
         "policies": info.get("policies", {}),
     }
-    with open(os.path.join(HERE, "kid_session.json"), "w", encoding="utf-8") as f:
+    with open(os.path.join(STATE_DIR, "kid_session.json"), "w", encoding="utf-8") as f:
         json.dump(data, f)
 
 
 def clear_kid_session():
     for name in ("kid_session.json", "signout.flag"):
         try:
-            os.remove(os.path.join(HERE, name))
+            os.remove(os.path.join(STATE_DIR, name))
         except FileNotFoundError:
             pass
 
 
 # ---- hosts backup / restore + local wipe + reboot ---------------------------
-HOSTS_BACKUP = os.path.join(HERE, "hosts.backup")
+HOSTS_BACKUP = os.path.join(STATE_DIR, "hosts.backup")
 
 
 def backup_hosts():
@@ -485,7 +501,7 @@ def wipe_local_user_data():
             pass
 
     for sub in ("roaming", "userfiles"):
-        d = os.path.join(HERE, sub)
+        d = os.path.join(STATE_DIR, sub)
         if not os.path.isdir(d):
             continue
         # First try to remove the whole tree, tolerating errors.

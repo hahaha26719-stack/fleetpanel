@@ -53,22 +53,25 @@ echo [3/5] Writing config ...
     echo }
 )
 
-echo [4/5] Registering logon task (SYSTEM, highest privileges, works on battery) ...
+echo [4/5] Registering logon task (runs as the LOGGED-IN USER, works on battery) ...
 REM Find pythonw.exe (no console window) so there's nothing for a kid to close.
 set "PYW=pythonw"
 where pythonw >nul 2>&1 || set "PYW=python"
 
-REM Build the task from an XML definition so we can DISABLE the battery
-REM conditions (DisallowStartIfOnBatteries / StopIfGoingOnBatteries) — the
-REM default would stop it running on laptops ("no start on battery").
+REM IMPORTANT: the GUI (login app, launcher, browser) must run as the
+REM INTERACTIVE LOGGED-IN USER, NOT SYSTEM. WebView2/browsers cannot run as
+REM SYSTEM (error 0x80080005). All kid policy enforcement is IN-APP, so no
+REM SYSTEM rights are needed. Principal = BUILTIN\Users + InteractiveToken.
+REM Battery conditions are disabled so it also runs on laptops.
 set "TASKXML=%DEST%\fleetagent_task.xml"
 > "%TASKXML%" (
     echo ^<?xml version="1.0" encoding="UTF-16"?^>
     echo ^<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"^>
-    echo   ^<RegistrationInfo^>^<Description^>FleetPanel login app^</Description^>^</RegistrationInfo^>
+    echo   ^<RegistrationInfo^>^<Description^>FleetPanel login app (runs as user)^</Description^>^</RegistrationInfo^>
     echo   ^<Triggers^>^<LogonTrigger^>^<Enabled^>true^</Enabled^>^</LogonTrigger^>^</Triggers^>
     echo   ^<Principals^>^<Principal id="Author"^>
-    echo     ^<UserId^>S-1-5-18^</UserId^>^<RunLevel^>HighestAvailable^</RunLevel^>
+    echo     ^<GroupId^>S-1-5-32-545^</GroupId^>
+    echo     ^<RunLevel^>LeastPrivilege^</RunLevel^>
     echo   ^</Principal^>^</Principals^>
     echo   ^<Settings^>
     echo     ^<DisallowStartIfOnBatteries^>false^</DisallowStartIfOnBatteries^>

@@ -261,8 +261,7 @@ class FleetLogin(tk.Tk):
         if not getattr(self, "_session_active", False) or WINDOWED:
             return
         import subprocess
-        here = os.path.dirname(os.path.abspath(__file__))
-        if os.path.exists(os.path.join(here, "signout.flag")):
+        if os.path.exists(os.path.join(agent.STATE_DIR, "signout.flag")):
             return  # signing out; let it go
         proc = getattr(self, "_launcher_proc", None)
         if proc is not None and proc.poll() is not None:
@@ -276,8 +275,7 @@ class FleetLogin(tk.Tk):
 
     def _watch_signout(self):
         """Poll for the launcher's signout.flag; when it appears, log out."""
-        here = os.path.dirname(os.path.abspath(__file__))
-        flag = os.path.join(here, "signout.flag")
+        flag = os.path.join(agent.STATE_DIR, "signout.flag")
         if os.path.exists(flag):
             try:
                 os.remove(flag)

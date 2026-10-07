@@ -29,12 +29,24 @@ LINE = "#e7e3d8"
 FONT = "Comic Sans MS"   # genuinely kid-friendly on Windows; falls back if absent
 
 
+def state_dir():
+    """Per-user WRITABLE runtime dir (must match agent.STATE_DIR). The app code
+    folder is read-only for standard users; runtime state lives here."""
+    base = os.environ.get("LOCALAPPDATA") or os.environ.get("TMP") or \
+        os.path.dirname(os.path.abspath(__file__))
+    d = os.path.join(base, "FleetAgent")
+    try:
+        os.makedirs(d, exist_ok=True)
+    except Exception:
+        d = os.path.dirname(os.path.abspath(__file__))
+    return d
+
+
 def load_session():
-    """Session info is written by login_app.py to kid_session.json next to the
-    apps (server, token, username, display_name, policies). Falls back to env
-    vars so an app can be launched/tested on its own."""
-    here = os.path.dirname(os.path.abspath(__file__))
-    path = os.path.join(here, "kid_session.json")
+    """Session info is written by login_app.py to kid_session.json in the
+    per-user state dir (server, token, username, display_name, policies). Falls
+    back to env vars so an app can be launched/tested on its own."""
+    path = os.path.join(state_dir(), "kid_session.json")
     if os.path.exists(path):
         with open(path) as f:
             return json.load(f)
@@ -89,10 +101,13 @@ def is_allowed(value, candidate):
 
 
 def user_files_dir(username):
-    here = os.path.dirname(os.path.abspath(__file__))
-    d = os.path.join(here, "userfiles", username)
+    d = os.path.join(state_dir(), "userfiles", username)
     os.makedirs(d, exist_ok=True)
     return d
+
+
+def signout_flag_path():
+    return os.path.join(state_dir(), "signout.flag")
 
 
 def style_button(btn):
