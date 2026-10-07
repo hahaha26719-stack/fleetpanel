@@ -71,6 +71,18 @@ def run_browser(session):
     if not url_allowed(web_mode, start):
         start = "about:blank"
 
+    # Give WebView2 a fresh, USER-writable data folder. The default location can
+    # be locked or owned by SYSTEM (the login app runs as SYSTEM), which causes
+    # CO_E_SERVER_EXEC_FAILURE (0x80080005). A per-user temp folder avoids that.
+    import os, tempfile
+    user = session.get("username", "guest")
+    data_dir = os.path.join(tempfile.gettempdir(), f"fleetbrowser_{user}")
+    try:
+        os.makedirs(data_dir, exist_ok=True)
+        os.environ["WEBVIEW2_USER_DATA_FOLDER"] = data_dir
+    except Exception:
+        pass
+
     window = webview.create_window("My Web Browser", url=start, width=1100, height=760)
 
     def on_navigating(url):
@@ -92,7 +104,28 @@ def run_browser(session):
     except Exception:
         pass
 
-    webview.start()
+    try:
+        webview.start()
+    except Exception as e:
+        _show_browser_error(str(e))
+
+
+def _show_browser_error(detail):
+    """Friendly fallback if the WebView2 engine can't start, with the usual
+    causes/fixes, instead of a raw crash."""
+    import tkinter as tk
+    from tkinter import messagebox
+    r = tk.Tk(); r.withdraw()
+    messagebox.showerror(
+        "Web browser can't start",
+        "The web browser couldn't start on this PC.\n\n"
+        "Usual fixes:\n"
+        "1) Install the Microsoft Edge WebView2 Runtime:\n"
+        "   https://developer.microsoft.com/microsoft-edge/webview2/\n"
+        "2) The browser must run as the logged-in USER, not SYSTEM.\n"
+        "3) Reboot and try again (clears a stuck browser profile).\n\n"
+        f"Details: {detail}")
+    r.destroy()
 
 
 def _selftest():
