@@ -114,10 +114,43 @@ class Launcher(tk.Tk):
     def open_app(self, script):
         path = os.path.join(HERE, script)
         try:
-            subprocess.Popen([PY, path], cwd=HERE)
+            proc = subprocess.Popen([PY, path], cwd=HERE)
         except Exception as e:
-            tk.messagebox = __import__("tkinter.messagebox", fromlist=["showerror"])
-            tk.messagebox.showerror("Oops", f"Couldn't open the app.\n{e}")
+            from tkinter import messagebox
+            messagebox.showerror("Oops", f"Couldn't open the app.\n{e}")
+            return
+        # Step OUT OF THE WAY so the app is visible: drop fullscreen/topmost and
+        # minimize the launcher. (Otherwise the app opens hidden behind it.)
+        self._step_aside()
+        # Watch the app; when it closes, bring the launcher back to full-screen.
+        self._watch_child(proc)
+
+    def _step_aside(self):
+        try:
+            if not WINDOWED:
+                self.attributes("-topmost", False)
+                self.attributes("-fullscreen", False)
+            self.iconify()   # minimize to taskbar
+        except Exception:
+            pass
+
+    def _come_back(self):
+        try:
+            self.deiconify()
+            if not WINDOWED:
+                self.attributes("-fullscreen", True)
+                self.attributes("-topmost", True)
+            self.lift()
+            self.focus_force()
+        except Exception:
+            pass
+
+    def _watch_child(self, proc):
+        # Poll the child app; when it exits, restore the launcher full-screen.
+        if proc.poll() is None:
+            self.after(600, lambda: self._watch_child(proc))
+        else:
+            self._come_back()
 
     def on_signout(self):
         # Signal login_app (which launched us) to end the session. We write a
