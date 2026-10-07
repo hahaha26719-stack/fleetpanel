@@ -83,9 +83,15 @@ class FleetLogin(tk.Tk):
         self.h2 = tkfont.Font(family="Segoe UI", size=15)
         self.base = tkfont.Font(family="Segoe UI", size=12)
 
-        self.container = tk.Frame(self, bg=BG)
+        # Use pack(expand) + an inner centering frame — more reliable than a
+        # bare .place() which can render blank on some Tk builds.
+        outer = tk.Frame(self, bg=BG)
+        outer.pack(expand=True, fill="both")
+        self.container = tk.Frame(outer, bg=BG)
         self.container.place(relx=0.5, rely=0.5, anchor="center")
         self.show_login()
+        # Force an initial draw so the window never shows blank.
+        self.update_idletasks()
 
     def _escape_hatch(self, event=None):
         """ADMIN-ONLY emergency exit (Ctrl+Alt+Q). Prompts for a FleetPanel
