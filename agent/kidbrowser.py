@@ -204,11 +204,8 @@ def run_browser(session):
                                    width=1100, height=760, maximized=not windowed)
     api.window = window
 
-    # After EVERY page finishes loading: (1) enforce policy on where we landed
-    # (covers link clicks / redirects), (2) inject the floating toolbar, and
-    # (3) on the very first (blank) load, go to Home so the window shows instantly.
-    state = {"went_home": False}
-
+    # After EVERY page finishes loading: enforce policy on where we landed
+    # (covers link clicks / redirects) and inject the floating toolbar.
     def _on_loaded(w=None):
         try:
             current = window.get_current_url() or ""
@@ -221,16 +218,30 @@ def run_browser(session):
             window.evaluate_js(TOOLBAR_JS)   # draw the search/URL bar on top
         except Exception:
             pass
-        if not state["went_home"]:
-            state["went_home"] = True
-            api.navigate("HOME")    # load the real home page now (window already visible)
     try:
         window.events.loaded += _on_loaded
     except Exception:
         pass
 
+    # Navigate to the real Home page via start(func=...): this runs reliably once
+    # the GUI is up, so we don't depend on the 'loaded' event firing for the
+    # local start page (which was leaving it stuck on "Loading the web…").
+    def _go_home():
+        import time as _t
+        _t.sleep(0.6)   # let the window finish creating
+        try:
+            api.navigate("HOME")
+        except Exception as e:
+            print(f"[browser] could not open home: {e}")
+
     try:
-        webview.start()
+        webview.start(_go_home)   # func runs on a worker thread once GUI is up
+    except TypeError:
+        # older pywebview signature
+        try:
+            webview.start(func=_go_home)
+        except Exception as e:
+            _show_browser_error(str(e))
     except Exception as e:
         _show_browser_error(str(e))
 
