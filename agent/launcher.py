@@ -235,7 +235,7 @@ class Fleet(tk.Tk):
             return
         for fn, label in [(lambda: agent.backup_hosts(), "hosts backup"),
                           (lambda: agent.write_kid_session(self.cfg, self.token, info), "kid session"),
-                          (lambda: agent.start_watchdog(info, interval=30), "watchdog")]:
+                          (lambda: agent.start_watchdog(info, interval=120), "watchdog")]:
             try:
                 fn()
             except Exception as e:
@@ -369,19 +369,25 @@ class Fleet(tk.Tk):
             pass
 
     def _refresh_taskbar(self):
-        # Rebuild the open-apps buttons; drop ones whose process has exited.
+        # Only REBUILD the buttons when the set of open apps actually changed —
+        # rebuilding Tk widgets every tick churns CPU for no reason.
         if self.taskbar is None:
             return
+        before = len(self._open)
         self._open = [o for o in self._open if o["proc"].poll() is None]
-        for w in self.task_apps.winfo_children():
-            w.destroy()
-        for o in self._open:
-            b = tk.Button(self.task_apps, text=f"{o['emoji']} {o['name']}",
-                          bg=CARD, fg=INK, relief="flat", bd=0, cursor="hand2",
-                          font=("Segoe UI", 11), padx=12, pady=6,
-                          command=lambda p=o: self._raise_app(p))
-            b.pack(side="left", padx=4, pady=7)
-        self.after(1200, self._refresh_taskbar)
+        signature = tuple(id(o) for o in self._open)
+        if signature != getattr(self, "_task_sig", None):
+            self._task_sig = signature
+            for w in self.task_apps.winfo_children():
+                w.destroy()
+            for o in self._open:
+                b = tk.Button(self.task_apps, text=f"{o['emoji']} {o['name']}",
+                              bg=CARD, fg=INK, relief="flat", bd=0, cursor="hand2",
+                              font=("Segoe UI", 11), padx=12, pady=6,
+                              command=lambda p=o: self._raise_app(p))
+                b.pack(side="left", padx=4, pady=7)
+        # poll less often (3s) — this only watches for apps opening/closing
+        self.after(3000, self._refresh_taskbar)
 
     def _raise_app(self, o):
         """Restore + bring the app's window to the front (real taskbar behavior).
