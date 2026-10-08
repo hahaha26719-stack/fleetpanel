@@ -36,6 +36,19 @@ import agent  # our refactored core: authenticate/start_session/end_session/enro
 
 WINDOWED = "--windowed" in sys.argv
 
+
+def agent_mode_allows(mode_value, candidate):
+    """Mirror of policies.is_allowed for the embedded launcher: decide whether
+    an app key is permitted under an app_mode value."""
+    if not mode_value:
+        return True
+    mode, _, rest = mode_value.partition(":")
+    if mode not in ("allow_except", "block_except"):
+        mode, rest = "allow_except", mode_value
+    items = [x.strip().lower() for x in rest.split(",") if x.strip()]
+    hit = any(it and it in candidate.lower() for it in items)
+    return hit if mode == "block_except" else not hit
+
 # ---- colours / theme ----
 BG = "#0f1220"
 CARD = "#1a1f36"
@@ -254,12 +267,10 @@ class FleetLogin(tk.Tk):
             agent.start_watchdog(info, interval=30)
         except Exception as e:
             print(f"[agent] watchdog failed to start (continuing): {e}")
-        try:
-            self._launch_launcher()                   # the kid launcher (not Explorer)
-        except Exception as e:
-            print(f"[agent] launcher failed (continuing): {e}")
 
-        self.after(0, lambda: self.show_session(info))
+        # Show the LAUNCHER as the homepage, in THIS SAME window (bundled —
+        # no separate launcher process).
+        self.after(0, lambda: self.show_launcher(info))
 
     def _launcher_exe(self):
         """Use pythonw.exe (no console window) so there's no console to close."""
@@ -270,103 +281,111 @@ class FleetLogin(tk.Tk):
                 return cand
         return exe
 
-    def _launch_launcher(self):
-        """Open the kid launcher, keep it alive (relaunch if killed), and watch
-        for its sign-out flag."""
+    # ======================================================= EMBEDDED LAUNCHER
+    # The launcher is the "homepage" shown in THIS window after login — bundled,
+    # not a separate process. Big tiles for the allowed apps; the apps
+    # themselves still open as their own windows.
+    def show_launcher(self, info):
         import subprocess
-        here = os.path.dirname(os.path.abspath(__file__))
-        launcher = os.path.join(here, "launcher.py")
-        args = [self._launcher_exe(), launcher]
-        if WINDOWED:
-            args.append("--windowed")
-        self._launcher_args = args
-        self._launcher_cwd = here
-        self._session_active = True
-        self._launcher_proc = subprocess.Popen(args, cwd=here)
-        self._watch_launcher()
-        self._watch_signout()
-
-    def _watch_launcher(self):
-        """If the launcher process dies while the session is active (and the kid
-        hasn't signed out), relaunch it — so a kid can't kill it to escape."""
-        if not getattr(self, "_session_active", False) or WINDOWED:
-            return
-        import subprocess
-        if os.path.exists(os.path.join(agent.STATE_DIR, "signout.flag")):
-            return  # signing out; let it go
-        proc = getattr(self, "_launcher_proc", None)
-        if proc is not None and proc.poll() is not None:
-            # it exited unexpectedly -> bring it back
-            try:
-                self._launcher_proc = subprocess.Popen(self._launcher_args,
-                                                       cwd=self._launcher_cwd)
-            except Exception as e:
-                print(f"[agent] could not relaunch launcher: {e}")
-        self.after(1500, self._watch_launcher)
-
-    def _watch_signout(self):
-        """Poll for the launcher's signout.flag; when it appears, log out."""
-        flag = os.path.join(agent.STATE_DIR, "signout.flag")
-        if os.path.exists(flag):
-            try:
-                os.remove(flag)
-            except Exception:
-                pass
-            self.on_logout()
-            return
-        self.after(1000, self._watch_signout)
-
-    # ----------------------------------------------------------- session screen
-    def show_session(self, info):
         self.info = info
+        self._session_active = True
         for w in self.container.winfo_children():
             w.destroy()
 
-        card = tk.Frame(self.container, bg=CARD, padx=48, pady=40,
-                        highlightbackground=LINE, highlightthickness=1)
-        card.pack()
-        name = info.get("display_name") or info["username"]
-        tk.Label(card, text=f"Welcome, {name}", font=self.h1, fg=INK, bg=CARD).pack(anchor="w")
-        tk.Label(card, text=f"Signed in as {info['username']}. Your policies and data are active.",
-                 font=self.h2, fg=MUT, bg=CARD).pack(anchor="w", pady=(4, 8))
+        # The three apps: key -> (label, emoji, colour, script)
+        APPS = [
+            ("notepad",    "Notepad", "📝", "#3ecf8e", "kidnotepad.py"),
+            ("powerpoint", "Slides",  "📊", "#ff6b9d", "kidppt.py"),
+            ("edge",       "Web",     "🌐", "#5b8cff", "kidbrowser.py"),
+        ]
 
-        n = len(info.get("policies", {}))
-        tk.Label(card, text=f"{n} polic{'y' if n == 1 else 'ies'} applied. Your desktop is ready.",
-                 font=self.base, fg=OK, bg=CARD).pack(anchor="w", pady=(0, 22))
+        name = info.get("display_name") or info.get("username", "friend")
+        tk.Label(self.container, text=f"Hi {name}! 👋", bg=BG, fg=INK,
+                 font=("Comic Sans MS", 30, "bold")).pack(pady=(10, 2))
+        tk.Label(self.container, text="Pick an app to start", bg=BG, fg=MUT,
+                 font=("Comic Sans MS", 16)).pack(pady=(0, 24))
 
-        self.status = tk.Label(card, text="", font=self.base, fg=MUT, bg=CARD)
-        self.status.pack(anchor="w", pady=(0, 8))
+        grid = tk.Frame(self.container, bg=BG)
+        grid.pack()
+        app_policy = info.get("policies", {}).get("app_mode", "")
+        here = os.path.dirname(os.path.abspath(__file__))
+        col = 0
+        for key, label, emoji, colour, script in APPS:
+            if not agent_mode_allows(app_policy, key):
+                continue
+            card = tk.Frame(grid, bg=colour, width=200, height=200)
+            card.pack_propagate(False)
+            tk.Button(card, text=f"{emoji}\n{label}", bg=colour, fg="white",
+                      activebackground=colour, activeforeground="white",
+                      relief="flat", bd=0, cursor="hand2",
+                      font=("Comic Sans MS", 20, "bold"),
+                      command=lambda s=script: self._open_app(s)
+                      ).pack(expand=True, fill="both")
+            card.grid(row=0, column=col, padx=18, pady=10)
+            col += 1
+        if col == 0:
+            tk.Label(grid, text="No apps are available.\nAsk your teacher. 🙂",
+                     bg=BG, fg=MUT, font=("Comic Sans MS", 16)).pack()
 
-        tk.Label(card, text="Use the desktop normally. Come back to this window\n"
-                            "(check the taskbar) and click below when you're done.",
-                 font=self.base, fg=MUT, bg=CARD, justify="left").pack(anchor="w", pady=(0, 12))
+        out = tk.Button(self.container, text="Sign out", bg=ERR, fg="white",
+                        relief="flat", bd=0, cursor="hand2",
+                        font=("Comic Sans MS", 15, "bold"), padx=18, pady=10,
+                        command=self.on_logout)
+        out.pack(pady=28)
 
-        logout = tk.Button(card, text="Log out / Switch user", font=self.h2, bg=ERR, fg="white",
-                           relief="flat", activebackground="#e05555", activeforeground="white",
-                           cursor="hand2", command=self.on_logout)
-        logout.pack(fill="x", ipady=8)
-
-        # Step aside so the user can actually use the desktop: leave full-screen
-        # and minimize. The window stays available on the taskbar to log out.
+    def _open_app(self, script):
+        import subprocess
+        here = os.path.dirname(os.path.abspath(__file__))
+        exe = self._launcher_exe()
+        args = [exe, os.path.join(here, script)]
+        if WINDOWED:
+            args.append("--windowed")
         try:
-            self.attributes("-fullscreen", False)
-            self.attributes("-topmost", False)
-            self.iconify()
+            proc = subprocess.Popen(args, cwd=here)
+        except Exception as e:
+            from tkinter import messagebox
+            messagebox.showerror("Oops", f"Couldn't open the app.\n{e}")
+            return
+        # Stay full-screen as the backdrop; just drop topmost so the app shows.
+        try:
+            if not WINDOWED:
+                self.attributes("-topmost", False)
         except Exception:
             pass
+        self._watch_app(proc)
+
+    def _watch_app(self, proc):
+        # When the app closes, bring this window (the launcher) back to front.
+        if proc.poll() is None:
+            self.after(600, lambda: self._watch_app(proc))
+        else:
+            try:
+                if not WINDOWED:
+                    self.attributes("-topmost", True)
+                    self.lift()
+                    self.focus_force()
+                    self.after(400, lambda: self.attributes("-topmost", False))
+            except Exception:
+                pass
 
     def on_logout(self):
-        self.status.config(text="Saving your files and cleaning up…")
+        # Replace the launcher with a "signing out" message in-window.
+        for w in self.container.winfo_children():
+            w.destroy()
+        tk.Label(self.container, text="Signing out…", font=self.h1, fg=INK, bg=BG).pack(pady=40)
+        self._logout_msg = tk.Label(self.container, text="Saving your files…",
+                                    font=self.base, fg=MUT, bg=BG)
+        self._logout_msg.pack()
         threading.Thread(target=self._do_logout, daemon=True).start()
 
     def _do_logout(self):
         try:
-            self._session_active = False   # stop the launcher relaunch-watchdog
-            agent.stop_watchdog()   # stop re-applying this user's policies
+            self._session_active = False
+            agent.stop_watchdog()
             agent.end_session(self.cfg, self.token, self.info)  # push files + revert policies
             agent.clear_kid_session()
         except Exception as e:
-            self.after(0, lambda: self.status.config(text=f"Logout error: {e}", fg=ERR))
+            self.after(0, lambda: self._logout_msg.config(text=f"Logout error: {e}", fg=ERR))
             return
         # Sign-out => REBOOT. On next boot, startup_cleanup() restores hosts and
         # wipes local data for a clean slate. (In windowed test mode we skip the
@@ -374,7 +393,7 @@ class FleetLogin(tk.Tk):
         if WINDOWED:
             self.after(0, self._back_to_login)
         else:
-            self.after(0, lambda: self.status.config(text="Signing out and restarting…"))
+            self.after(0, lambda: self._logout_msg.config(text="Signing out and restarting…"))
             agent.reboot()
 
     def _back_to_login(self):
