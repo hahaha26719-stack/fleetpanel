@@ -38,9 +38,11 @@ def normalize_url(text):
     t = (text or "").strip()
     if not t:
         return ""
-    looks_like_url = ("." in t and " " not in t) or t.startswith("http")
+    if t.startswith("http://") or t.startswith("https://"):
+        return t
+    looks_like_url = ("." in t and " " not in t)
     if looks_like_url:
-        return t if "://" in t else "http://" + t
+        return "https://" + t          # default to HTTPS, not HTTP
     # a search phrase -> DuckDuckGo with safe-search on (kid-friendly, no account)
     return "https://duckduckgo.com/?kp=1&q=" + urllib.parse.quote(t)
 
@@ -110,13 +112,28 @@ class _Api:
         if not url:
             return
         if not url_allowed(self.web_mode, url):
-            blocked = ("data:text/html," + urllib.parse.quote(
-                "<html><body style=\"font-family:Comic Sans MS,sans-serif;background:#fef6e4;"
-                "text-align:center;padding-top:80px\"><h1>🚫 That page isn't allowed</h1>"
-                "<p>Ask your teacher if you need it.</p></body></html>"))
-            self.window.load_url(blocked)
+            self._show_blocked(url)
             return
         self.window.load_url(url)
+
+    def _show_blocked(self, url):
+        host = host_of(url) or url
+        page = (
+            "<html><head><meta charset='utf-8'></head>"
+            "<body style=\"font-family:'Comic Sans MS',sans-serif;background:#fef6e4;"
+            "text-align:center;padding-top:90px;color:#2d2a32\">"
+            "<div style='font-size:70px'>🚫</div>"
+            "<h1>This website is blocked</h1>"
+            f"<p style='font-size:20px'><b>{host}</b> isn't on the allowed list.</p>"
+            "<p style='color:#8a8694'>Ask your teacher if you need it.</p>"
+            "<p style='margin-top:30px'><a href='#' onclick=\"window.pywebview.api.navigate('HOME')\" "
+            "style='font-size:18px;color:#5b8cff'>🏠 Go back home</a></p>"
+            "</body></html>")
+        try:
+            self.window.load_html(page)
+        except Exception:
+            # older pywebview: fall back to a data: URL
+            self.window.load_url("data:text/html," + urllib.parse.quote(page))
 
     def back(self):
         try:
@@ -182,7 +199,7 @@ def run_browser(session):
         except Exception:
             current = ""
         if current and current.startswith("http") and not url_allowed(web_mode, current):
-            api.navigate(current)   # redirect to the friendly blocked page
+            api._show_blocked(current)   # clear "blocked" page, not a confusing 404
             return
         try:
             window.evaluate_js(TOOLBAR_JS)   # draw the search/URL bar on top
@@ -234,8 +251,10 @@ def _selftest():
     assert url_allowed("", "https://whatever.com") is True
     # normalize
     assert normalize_url("cats and dogs").startswith("https://duckduckgo.com/")
-    assert normalize_url("example.com") == "http://example.com"
+    assert normalize_url("google.com") == "https://google.com", normalize_url("google.com")
+    assert normalize_url("example.com") == "https://example.com"
     assert normalize_url("https://a.com") == "https://a.com"
+    assert normalize_url("http://a.com") == "http://a.com"
     print("kidbrowser selftest OK")
 
 
