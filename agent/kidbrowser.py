@@ -119,21 +119,21 @@ class _Api:
     def _show_blocked(self, url):
         host = host_of(url) or url
         page = (
-            "<html><head><meta charset='utf-8'></head>"
+            "<!doctype html><html><head><meta charset='utf-8'></head>"
             "<body style=\"font-family:'Comic Sans MS',sans-serif;background:#fef6e4;"
             "text-align:center;padding-top:90px;color:#2d2a32\">"
-            "<div style='font-size:70px'>🚫</div>"
+            "<div style='font-size:70px'>&#128683;</div>"
             "<h1>This website is blocked</h1>"
             f"<p style='font-size:20px'><b>{host}</b> isn't on the allowed list.</p>"
             "<p style='color:#8a8694'>Ask your teacher if you need it.</p>"
-            "<p style='margin-top:30px'><a href='#' onclick=\"window.pywebview.api.navigate('HOME')\" "
-            "style='font-size:18px;color:#5b8cff'>🏠 Go back home</a></p>"
+            "<p style='margin-top:30px'><a href='javascript:window.pywebview.api.navigate(&quot;HOME&quot;)' "
+            "style='font-size:18px;color:#5b8cff'>&#127968; Go back home</a></p>"
             "</body></html>")
-        try:
-            self.window.load_html(page)
-        except Exception:
-            # older pywebview: fall back to a data: URL
-            self.window.load_url("data:text/html," + urllib.parse.quote(page))
+        # Use a FULLY URL-encoded data: URL (quote everything incl. '>' and '/')
+        # so the engine doesn't mangle it into a broken local request. load_html
+        # is avoided — it spins a local server that corrupts the page on some
+        # pywebview versions (the "127.0.0.1:.../html%3E" error).
+        self.window.load_url("data:text/html;charset=utf-8," + urllib.parse.quote(page, safe=""))
 
     def back(self):
         try:
@@ -179,10 +179,10 @@ def run_browser(session):
     # Start with a fast LOCAL page (has a <body> so the toolbar injects reliably
     # and the kid sees something instantly), then navigate Home in the background
     # — the window appears immediately instead of waiting on a network page.
-    start = ("data:text/html," + urllib.parse.quote(
-        "<html><body style=\"font-family:Comic Sans MS,sans-serif;background:#fef6e4;"
-        "text-align:center;padding-top:120px;color:#8a8694\">"
-        "<h2>Loading the web… 🌐</h2></body></html>"))
+    start = ("data:text/html;charset=utf-8," + urllib.parse.quote(
+        "<!doctype html><html><body style=\"font-family:Comic Sans MS,sans-serif;"
+        "background:#fef6e4;text-align:center;padding-top:120px;color:#8a8694\">"
+        "<h2>Loading the web&#8230; &#127760;</h2></body></html>", safe=""))
     # The real site loads in the FULL window (every site works, no framing).
     window = webview.create_window("My Web Browser", url=start, js_api=api,
                                    width=1100, height=760, maximized=not windowed)
