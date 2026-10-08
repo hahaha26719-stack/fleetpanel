@@ -6,7 +6,7 @@ REM
 REM  Run AS ADMINISTRATOR.
 REM
 REM  Usage:
-REM    set-kiosk-shell.bat set   kiosk     -> make login_app the kiosk shell
+REM    set-kiosk-shell.bat set   kiosk     -> make the launcher the kiosk shell
 REM    set-kiosk-shell.bat unset kiosk     -> restore the normal desktop
 REM
 REM  SAFETY:
@@ -39,7 +39,7 @@ echo User '%KUSER%' SID = %SID%
 
 set "PYW=pythonw"
 where pythonw >nul 2>&1 || set "PYW=python"
-set "SHELLCMD=%PYW% C:\FleetAgent\login_app.py"
+set "SHELLCMD=%PYW% C:\FleetAgent\launcher.py"
 
 REM --- the user's hive: loaded live as HKU\<SID>, or load from NTUSER.DAT ---
 set "HIVE=HKU\%SID%"

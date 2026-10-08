@@ -35,7 +35,6 @@ if not exist "%DEST%" mkdir "%DEST%"
 
 echo [2/5] Copying agent + kid app files ...
 copy /Y "%~dp0agent\agent.py"       "%DEST%\agent.py" >nul
-copy /Y "%~dp0agent\login_app.py"   "%DEST%\login_app.py" >nul
 copy /Y "%~dp0agent\kidcommon.py"   "%DEST%\kidcommon.py" >nul
 copy /Y "%~dp0agent\launcher.py"    "%DEST%\launcher.py" >nul
 copy /Y "%~dp0agent\kidnotepad.py"  "%DEST%\kidnotepad.py" >nul
@@ -82,7 +81,7 @@ set "TASKXML=%DEST%\fleetagent_task.xml"
     echo     ^<MultipleInstancesPolicy^>IgnoreNew^</MultipleInstancesPolicy^>
     echo   ^</Settings^>
     echo   ^<Actions Context="Author"^>
-    echo     ^<Exec^>^<Command^>%PYW%^</Command^>^<Arguments^>"%DEST%\login_app.py"^</Arguments^>^</Exec^>
+    echo     ^<Exec^>^<Command^>%PYW%^</Command^>^<Arguments^>"%DEST%\launcher.py"^</Arguments^>^</Exec^>
     echo   ^</Actions^>
     echo ^</Task^>
 )

@@ -84,9 +84,12 @@ def run_browser(session):
         pass
 
     windowed = "--windowed" in sys.argv
+    # Open MAXIMIZED (not fullscreen) so the window keeps its title bar with the
+    # minimize / maximize / close controls — matching Notepad & Slides. Fullscreen
+    # would hide those controls (that was the missing "tray").
     window = webview.create_window("My Web Browser", url=start,
                                    width=1100, height=760,
-                                   fullscreen=not windowed, maximized=not windowed)
+                                   maximized=not windowed)
 
     def on_navigating(url):
         # Block navigations that violate policy by redirecting to a friendly page.
