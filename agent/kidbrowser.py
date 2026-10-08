@@ -56,6 +56,77 @@ def url_allowed(web_mode_value, url):
     return kc.is_allowed(web_mode_value, host)
 
 
+HOME_URL = "https://duckduckgo.com/?kp=1"
+
+# A kid-friendly toolbar page. It has Back / Forward / Home buttons, a combined
+# SEARCH + URL box, and a big area showing the current page in an <iframe>.
+# The toolbar talks to Python via window.pywebview.api so navigation is
+# policy-checked before loading. (Sites that block framing fall back to opening
+# in the whole window via api.open_top.)
+TOOLBAR_HTML = """
+<!doctype html><html><head><meta charset="utf-8">
+<style>
+  html,body{margin:0;height:100%;font-family:'Comic Sans MS',sans-serif;background:#fef6e4;}
+  #bar{display:flex;gap:8px;align-items:center;padding:10px;background:#5b8cff;}
+  #bar button{font-size:18px;border:0;border-radius:10px;padding:8px 12px;cursor:pointer;background:#fff;color:#2d2a32;}
+  #addr{flex:1;font-size:18px;border:0;border-radius:12px;padding:10px 14px;outline:none;}
+  #go{background:#3ecf8e;color:#fff;font-weight:bold;}
+  #frame{width:100%;height:calc(100% - 60px);border:0;background:#fff;}
+  #msg{padding:40px;text-align:center;color:#8a8694;}
+</style></head><body>
+  <div id="bar">
+    <button onclick="go(-1)">◀</button>
+    <button onclick="go(1)">▶</button>
+    <button onclick="home()">🏠</button>
+    <input id="addr" placeholder="Search the web or type a website…"
+           onkeydown="if(event.key==='Enter')navigate()">
+    <button id="go" onclick="navigate()">🔍 Go</button>
+  </div>
+  <iframe id="frame" src=""></iframe>
+  <div id="msg" style="display:none"></div>
+<script>
+  const frame=document.getElementById('frame');
+  const addr=document.getElementById('addr');
+  const msg=document.getElementById('msg');
+  function navigate(){ window.pywebview.api.navigate(addr.value); }
+  function home(){ window.pywebview.api.navigate('HOME'); }
+  function go(d){ try{ history.go(d); }catch(e){} }
+  // Python calls these:
+  function loadInFrame(url){ msg.style.display='none'; frame.style.display='block'; frame.src=url; addr.value=url; }
+  function showBlocked(){ frame.style.display='none'; msg.style.display='block';
+    msg.innerHTML="<h1>🚫 That page isn't allowed</h1><p>Ask your teacher if you need it.</p>"; }
+  function setAddr(u){ addr.value=u; }
+</script>
+</body></html>
+"""
+
+
+class _Api:
+    """Bridge the HTML toolbar <-> Python. Navigation is policy-checked here."""
+    def __init__(self, session, web_mode):
+        self.session = session
+        self.web_mode = web_mode
+        self.window = None
+
+    def navigate(self, text):
+        if text == "HOME":
+            url = HOME_URL
+        else:
+            url = normalize_url(text)
+        if not url:
+            return
+        if not url_allowed(self.web_mode, url):
+            self.window.evaluate_js("showBlocked()")
+            return
+        # load the allowed URL inside the toolbar's iframe.
+        # NOTE: some big sites (Google, YouTube, Facebook) refuse to be shown in
+        # an iframe (X-Frame-Options / frame-ancestors). For a kid browser,
+        # curated/educational sites and most search results pages work fine; if
+        # a site shows blank, it's refusing framing, not a policy block.
+        safe = url.replace("\\", "\\\\").replace("'", "\\'")
+        self.window.evaluate_js(f"loadInFrame('{safe}')")
+
+
 # --------------------------------------------------------------- GUI (WebView2)
 def run_browser(session):
     try:
@@ -67,13 +138,8 @@ def run_browser(session):
         return
 
     web_mode = session.get("policies", {}).get("web_mode", "")
-    start = "https://duckduckgo.com/?kp=1"
-    if not url_allowed(web_mode, start):
-        start = "about:blank"
 
-    # Give WebView2 a fresh, USER-writable data folder. The default location can
-    # be locked or owned by SYSTEM (the login app runs as SYSTEM), which causes
-    # CO_E_SERVER_EXEC_FAILURE (0x80080005). A per-user temp folder avoids that.
+    # Per-user WebView2 data folder (avoids 0x80080005 under locked profiles).
     import os, tempfile
     user = session.get("username", "guest")
     data_dir = os.path.join(tempfile.gettempdir(), f"fleetbrowser_{user}")
@@ -84,29 +150,21 @@ def run_browser(session):
         pass
 
     windowed = "--windowed" in sys.argv
-    # Open MAXIMIZED (not fullscreen) so the window keeps its title bar with the
-    # minimize / maximize / close controls — matching Notepad & Slides. Fullscreen
-    # would hide those controls (that was the missing "tray").
-    window = webview.create_window("My Web Browser", url=start,
-                                   width=1100, height=760,
-                                   maximized=not windowed)
+    api = _Api(session, web_mode)
+    # Load our toolbar page as the window content; it hosts the address/search
+    # bar and the iframe that shows the actual website.
+    window = webview.create_window("My Web Browser", html=TOOLBAR_HTML, js_api=api,
+                                   width=1100, height=760, maximized=not windowed)
+    api.window = window
 
-    def on_navigating(url):
-        # Block navigations that violate policy by redirecting to a friendly page.
-        if not url_allowed(web_mode, url):
-            blocked = ("data:text/html,"
-                       + urllib.parse.quote(
-                           "<html><body style='font-family:Comic Sans MS,sans-serif;"
-                           "background:#fef6e4;text-align:center;padding-top:80px'>"
-                           "<h1>🚫 That page isn't allowed</h1>"
-                           "<p>Ask your teacher if you need it.</p>"
-                           "<p><a href='https://duckduckgo.com/?kp=1'>Go back to search</a></p>"
-                           "</body></html>"))
-            window.load_url(blocked)
-
-    # pywebview exposes events differently per version; guard it.
+    # Once loaded, navigate to the home page (policy-checked) via the API.
+    def _start_home(w=None):
+        try:
+            api.navigate("HOME")
+        except Exception:
+            pass
     try:
-        window.events.loading += lambda w: on_navigating(window.get_current_url())
+        window.events.loaded += _start_home
     except Exception:
         pass
 
