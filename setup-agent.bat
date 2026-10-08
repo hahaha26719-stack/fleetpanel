@@ -41,8 +41,8 @@ copy /Y "%~dp0agent\kidnotepad.py"  "%DEST%\kidnotepad.py" >nul
 copy /Y "%~dp0agent\kidppt.py"      "%DEST%\kidppt.py" >nul
 copy /Y "%~dp0agent\kidbrowser.py"  "%DEST%\kidbrowser.py" >nul
 
-echo     Installing the browser engine (pywebview, uses Windows WebView2) ...
-python -m pip install --quiet pywebview 2>nul || echo [WARN] pip/pywebview not installed - the browser needs it; install Python + 'pip install pywebview'.
+echo     Installing Python packages (pywebview for the browser, pillow for images) ...
+python -m pip install --quiet pywebview pillow 2>nul || echo [WARN] pip install failed - the browser needs pywebview and pictures need pillow; install Python + 'pip install pywebview pillow'.
 
 echo [3/5] Writing config ...
 > "%DEST%\agent_config.json" (

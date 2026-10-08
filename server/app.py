@@ -376,6 +376,45 @@ def api_pictures(username):
     return jsonify({"results": results})
 
 
+_IMG_CACHE = {}            # url -> (ts, content-type, bytes)
+_IMG_CACHE_TTL = 3600
+_IMG_MAX_BYTES = 4 * 1024 * 1024   # 4 MB per image (protects the Pi)
+
+
+@app.route("/api/image/<username>", methods=["GET"])
+def api_image(username):
+    """Proxy the ACTUAL image bytes for a result the kid chose. The Pi fetches
+    it from the web and streams it to the PC, so the real picture can be placed
+    on a slide/note even though the kid PC can't reach the open web. Cached."""
+    _agent_auth()
+    user = models.get_user_by_name(username)
+    if not user:
+        abort(404)
+    url = request.args.get("url", "")
+    if not (url.startswith("http://") or url.startswith("https://")):
+        abort(400)
+    now = time.time()
+    if url in _IMG_CACHE and now - _IMG_CACHE[url][0] < _IMG_CACHE_TTL:
+        _, ctype, data = _IMG_CACHE[url]
+        return app.response_class(data, mimetype=ctype)
+    try:
+        req = _urlreq.Request(url, headers={"User-Agent": "FleetPanel/1.0"})
+        with _urlreq.urlopen(req, timeout=15) as r:
+            ctype = r.headers.get("Content-Type", "image/jpeg")
+            if "image" not in ctype:
+                abort(415)
+            data = r.read(_IMG_MAX_BYTES + 1)
+        if len(data) > _IMG_MAX_BYTES:
+            abort(413)
+    except Exception:
+        abort(502)
+    _IMG_CACHE[url] = (now, ctype, data)
+    if len(_IMG_CACHE) > 100:
+        for k, _ in sorted(_IMG_CACHE.items(), key=lambda kv: kv[1][0])[:30]:
+            _IMG_CACHE.pop(k, None)
+    return app.response_class(data, mimetype=ctype)
+
+
 # ============================================================= COLLABORATION
 # Simple room-code collaboration for the kid Notepad / PowerPoint. A room is a
 # shared document kept in memory on the Pi. Clients poll to pull and push a full

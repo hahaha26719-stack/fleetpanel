@@ -110,6 +110,30 @@ def signout_flag_path():
     return os.path.join(state_dir(), "signout.flag")
 
 
+def fetch_image(session, url, max_w=360, max_h=260):
+    """Download an image through the Pi proxy and return a Tk-displayable image
+    (requires Pillow). Returns None if Pillow is missing or the fetch fails.
+    Caller must keep a reference to the returned object (Tk needs it alive)."""
+    try:
+        from PIL import Image, ImageTk
+    except Exception:
+        return None
+    import io, urllib.parse
+    server = session.get("server", "").rstrip("/")
+    user = session.get("username", "guest")
+    proxy = f"{server}/api/image/{user}?url=" + urllib.parse.quote(url)
+    try:
+        import urllib.request
+        req = urllib.request.Request(proxy, headers={"X-Agent-Token": session.get("token", "")})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            raw = r.read()
+        im = Image.open(io.BytesIO(raw))
+        im.thumbnail((max_w, max_h))
+        return ImageTk.PhotoImage(im)
+    except Exception:
+        return None
+
+
 def maximize(win, windowed=False):
     """Make a kid app fill the screen (kiosk feel, no desktop peeking through).
     In windowed/test mode, use a normal resizable window instead so you can

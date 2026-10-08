@@ -153,6 +153,11 @@ class KidSlides(tk.Tk):
                                font=(kc.FONT, 10), justify="left", anchor="w")
         self.extras.pack(fill="x", pady=(4, 0))
 
+        # picture thumbnails shown under the editor
+        self.pic_preview = tk.Frame(right, bg=kc.PANEL)
+        self.pic_preview.pack(fill="x", pady=(4, 0))
+        self._thumb_refs = []   # keep PhotoImage refs alive
+
         self.counter = tk.Label(right, text="", bg=kc.PANEL, fg=kc.MUT, font=(kc.FONT, 11))
         self.counter.pack(anchor="e")
 
@@ -182,12 +187,42 @@ class KidSlides(tk.Tk):
         self._apply_visual(s)
         self.counter.config(text=f"Slide {self.index+1} of {len(self.slides)}")
         extras = []
-        if s["pictures"]:
-            extras.append("🖼 " + ", ".join(p.get("title", "pic")[:18] for p in s["pictures"]))
         if s["math"]:
             extras.append("∑ " + " ; ".join(s["math"]))
         self.extras.config(text="\n".join(extras))
+        self._render_thumbs(s)
         self._refresh_slide_list()
+
+    def _render_thumbs(self, s):
+        """Show the ACTUAL picture thumbnails under the editor (needs Pillow)."""
+        for w in self.pic_preview.winfo_children():
+            w.destroy()
+        self._thumb_refs = []
+        if not s["pictures"]:
+            return
+        tk.Label(self.pic_preview, text="Pictures on this slide:", bg=kc.PANEL,
+                 fg=kc.MUT, font=(kc.FONT, 10)).pack(anchor="w")
+        row = tk.Frame(self.pic_preview, bg=kc.PANEL)
+        row.pack(anchor="w")
+        for p in s["pictures"]:
+            cell = tk.Frame(row, bg=kc.PANEL)
+            cell.pack(side="left", padx=6, pady=4)
+            lbl = tk.Label(cell, text="🖼 " + (p.get("title", "pic")[:14]),
+                           bg=kc.PANEL, fg=kc.MUT, font=(kc.FONT, 9))
+            lbl.pack()
+            # fetch the real image in the background, then swap it in
+            threading.Thread(target=self._load_thumb, args=(p, lbl), daemon=True).start()
+
+    def _load_thumb(self, p, lbl):
+        img = kc.fetch_image(self.session, p.get("url", ""), max_w=160, max_h=120)
+        def swap():
+            if img is not None:
+                self._thumb_refs.append(img)
+                try:
+                    lbl.config(image=img, text="")
+                except Exception:
+                    pass
+        self.after(0, swap)
 
     def _apply_visual(self, s):
         # reflect font/color/bg on the editor so it previews the slide
@@ -304,7 +339,7 @@ class KidSlides(tk.Tk):
     # ------------------------------------------------------------ present
     def present(self):
         self._store_slide()
-        Present(self, self.slides)
+        Present(self, self.slides, self.session)
 
     # ------------------------------------------------------------ save/open
     def save_file(self):
@@ -450,9 +485,11 @@ class MathDialog(tk.Toplevel):
 # ------------------------------------------------------------- present mode
 class Present(tk.Toplevel):
     """Full-screen slideshow. Arrow keys / click to move, Esc to exit."""
-    def __init__(self, parent, slides):
+    def __init__(self, parent, slides, session):
         super().__init__(parent)
         self.slides = slides
+        self.parent_session = session
+        self._present_refs = []
         self.i = 0
         self.attributes("-fullscreen", True)
         self.configure(bg="black")
@@ -485,9 +522,25 @@ class Present(tk.Toplevel):
         for m in s.get("math", []):
             tk.Label(self.canvas, text=m, bg=s["bg"], fg=s["color"],
                      font=(kc.FONT, max(s["font_size"] + 6, 28))).pack(pady=4)
+        # show ACTUAL pictures (fetched via the Pi, needs Pillow)
+        self._present_refs = []
         for p in s.get("pictures", []):
-            tk.Label(self.canvas, text="🖼 " + p.get("title", ""), bg=s["bg"],
-                     fg=s["color"], font=(kc.FONT, 14)).pack(pady=2)
+            holder = tk.Label(self.canvas, text="🖼 " + p.get("title", ""), bg=s["bg"],
+                              fg=s["color"], font=(kc.FONT, 14))
+            holder.pack(pady=6)
+            threading.Thread(target=self._present_img, args=(p, holder, s["bg"]),
+                             daemon=True).start()
+
+    def _present_img(self, p, holder, bg):
+        img = kc.fetch_image(self.parent_session, p.get("url", ""), max_w=640, max_h=420)
+        def swap():
+            if img is not None:
+                self._present_refs.append(img)
+                try:
+                    holder.config(image=img, text="", bg=bg)
+                except Exception:
+                    pass
+        self.after(0, swap)
         tk.Label(self.canvas, text=f"{self.i+1} / {len(self.slides)}   (→ next, Esc exit)",
                  bg=s["bg"], fg="#999", font=(kc.FONT, 11)).pack(side="bottom", pady=10)
 

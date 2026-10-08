@@ -164,11 +164,24 @@ class KidNotepad(tk.Tk):
         self.after(0, show)
 
     def _insert_picture(self, item):
-        # Insert a friendly reference into the note (title + source link).
-        self.text.insert("end", f"\n[Picture: {item.get('title','')}] "
-                                f"{item.get('url','')}\n")
+        # Insert the ACTUAL image into the note (needs Pillow). Falls back to a
+        # text reference if Pillow isn't installed or the fetch fails.
         self.nb.select(0)
-        messagebox.showinfo("Added", "Added to your note! 📝", parent=self)
+        if not hasattr(self, "_img_refs"):
+            self._img_refs = []
+        self.text.insert("end", f"\n[{item.get('title','picture')}]\n")
+
+        def work():
+            img = kc.fetch_image(self.session, item.get("url", ""), max_w=360, max_h=260)
+            def place():
+                if img is not None:
+                    self._img_refs.append(img)   # keep a reference alive
+                    self.text.image_create("end", image=img)
+                    self.text.insert("end", "\n")
+                else:
+                    self.text.insert("end", f"(picture: {item.get('url','')})\n")
+            self.after(0, place)
+        threading.Thread(target=work, daemon=True).start()
 
     # --------------------------------------------------------- 4. Together
     def _build_together(self, nb):
