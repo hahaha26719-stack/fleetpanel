@@ -435,6 +435,14 @@ class Fleet(tk.Tk):
 
     def _open_app(self, script, label, emoji):
         here = os.path.dirname(os.path.abspath(__file__))
+        # If this app is already open, RAISE it instead of launching a second
+        # copy — stops pythonw processes stacking up (and CPU climbing) when a
+        # kid taps a tile repeatedly.
+        self._open = [o for o in self._open if o["proc"].poll() is None]
+        for o in self._open:
+            if o.get("script") == script:
+                self._raise_app(o)
+                return
         args = [self._launcher_exe(), os.path.join(here, script)]
         if WINDOWED:
             args.append("--windowed")
@@ -444,7 +452,7 @@ class Fleet(tk.Tk):
             from tkinter import messagebox
             messagebox.showerror("Oops", f"Couldn't open the app.\n{e}")
             return
-        self._open.append({"name": label, "emoji": emoji, "proc": proc})
+        self._open.append({"name": label, "emoji": emoji, "proc": proc, "script": script})
         try:
             if not WINDOWED:
                 self.attributes("-topmost", False)   # let the app sit on top
