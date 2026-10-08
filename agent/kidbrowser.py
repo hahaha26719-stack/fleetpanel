@@ -60,6 +60,26 @@ def url_allowed(web_mode_value, url):
 
 HOME_URL = "https://duckduckgo.com/?kp=1"
 
+
+def _page_to_file_url(name, html):
+    """Write an HTML page to a real local file and return a file:// URL for it.
+    This is the most reliable way to show our own pages in pywebview — it avoids
+    load_html (spins a local server that mangled the page into a broken
+    '127.0.0.1:.../html%3E' request on some versions) and data: URL quirks."""
+    import os, tempfile
+    d = os.path.join(tempfile.gettempdir(), "fleetbrowser_pages")
+    try:
+        os.makedirs(d, exist_ok=True)
+    except Exception:
+        d = tempfile.gettempdir()
+    path = os.path.join(d, f"{name}.html")
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(html)
+    except Exception:
+        return "about:blank"
+    return "file:///" + path.replace("\\", "/")
+
 # A floating toolbar injected into EVERY page via JavaScript after it loads.
 # Because the real site loads in the FULL window (not an iframe), every website
 # works — Google, YouTube, etc. The bar sits fixed on top. Buttons call the
@@ -129,11 +149,7 @@ class _Api:
             "<p style='margin-top:30px'><a href='javascript:window.pywebview.api.navigate(&quot;HOME&quot;)' "
             "style='font-size:18px;color:#5b8cff'>&#127968; Go back home</a></p>"
             "</body></html>")
-        # Use a FULLY URL-encoded data: URL (quote everything incl. '>' and '/')
-        # so the engine doesn't mangle it into a broken local request. load_html
-        # is avoided — it spins a local server that corrupts the page on some
-        # pywebview versions (the "127.0.0.1:.../html%3E" error).
-        self.window.load_url("data:text/html;charset=utf-8," + urllib.parse.quote(page, safe=""))
+        self.window.load_url(_page_to_file_url("blocked", page))
 
     def back(self):
         try:
@@ -179,10 +195,10 @@ def run_browser(session):
     # Start with a fast LOCAL page (has a <body> so the toolbar injects reliably
     # and the kid sees something instantly), then navigate Home in the background
     # — the window appears immediately instead of waiting on a network page.
-    start = ("data:text/html;charset=utf-8," + urllib.parse.quote(
+    start = _page_to_file_url("loading",
         "<!doctype html><html><body style=\"font-family:Comic Sans MS,sans-serif;"
         "background:#fef6e4;text-align:center;padding-top:120px;color:#8a8694\">"
-        "<h2>Loading the web&#8230; &#127760;</h2></body></html>", safe=""))
+        "<h2>Loading the web&#8230; &#127760;</h2></body></html>")
     # The real site loads in the FULL window (every site works, no framing).
     window = webview.create_window("My Web Browser", url=start, js_api=api,
                                    width=1100, height=760, maximized=not windowed)
