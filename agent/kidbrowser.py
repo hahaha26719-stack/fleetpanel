@@ -147,6 +147,22 @@ TOOLBAR_JS = r"""
   document.getElementById('__fb_back').onclick=function(){ window.pywebview.api.back(); };
   document.getElementById('__fb_fwd').onclick=function(){ window.pywebview.api.forward(); };
   document.getElementById('__fb_home').onclick=function(){ window.pywebview.api.navigate('HOME'); };
+
+  // Keep EVERYTHING in our window — never let a link spawn the real Edge.
+  // 1) strip target="_blank" from existing + future links
+  function fixLinks(root){
+    (root||document).querySelectorAll('a[target]').forEach(function(a){a.removeAttribute('target');});
+  }
+  fixLinks(document);
+  new MutationObserver(function(muts){muts.forEach(function(m){fixLinks(m.target);});})
+    .observe(document.documentElement,{childList:true,subtree:true});
+  // 2) intercept any click on a _blank link and navigate in-window instead
+  document.addEventListener('click',function(e){
+    var a=e.target.closest&&e.target.closest('a');
+    if(a&&a.href&&(a.target==='_blank')){ e.preventDefault(); window.pywebview.api.navigate(a.href); }
+  },true);
+  // 3) override window.open so JS pop-ups route through our policy-checked nav
+  window.open=function(u){ if(u) window.pywebview.api.navigate(u); return null; };
 })();
 """
 
