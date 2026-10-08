@@ -251,18 +251,38 @@ def run_browser(session):
 
     # After EVERY page finishes loading: enforce policy on where we landed
     # (covers link clicks / redirects) and inject the floating toolbar.
+    # THROTTLED: some sites (SPAs) fire 'loaded' rapidly; without a guard that
+    # pegs the CPU re-checking the URL and re-injecting JS. We run at most once
+    # per URL and no more often than every 1.5s.
+    import time as _time
+    guard = {"last_url": None, "last_t": 0.0, "busy": False}
+
     def _on_loaded(w=None):
-        try:
-            current = window.get_current_url() or ""
-        except Exception:
-            current = ""
-        if current and current.startswith("http") and not url_allowed(web_mode, current):
-            api._show_blocked(current)   # clear "blocked" page, not a confusing 404
+        if guard["busy"]:
             return
+        now = _time.time()
+        if now - guard["last_t"] < 1.5:
+            return
+        guard["busy"] = True
         try:
-            window.evaluate_js(TOOLBAR_JS)   # draw the search/URL bar on top
-        except Exception:
-            pass
+            try:
+                current = window.get_current_url() or ""
+            except Exception:
+                current = ""
+            # skip if the URL hasn't actually changed since last time
+            if current and current == guard["last_url"]:
+                return
+            guard["last_url"] = current
+            guard["last_t"] = now
+            if current and current.startswith("http") and not url_allowed(web_mode, current):
+                api._show_blocked(current)
+                return
+            try:
+                window.evaluate_js(TOOLBAR_JS)
+            except Exception:
+                pass
+        finally:
+            guard["busy"] = False
     try:
         window.events.loaded += _on_loaded
     except Exception:
