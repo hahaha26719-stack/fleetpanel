@@ -61,6 +61,38 @@ def url_allowed(web_mode_value, url):
 HOME_URL = "https://duckduckgo.com/?kp=1"
 
 
+def _home_html():
+    """A fast LOCAL home page: a big search box + quick site buttons. Loads
+    instantly (no network), so opening the browser feels immediate. The search
+    box and buttons call the Python API, which policy-checks before navigating."""
+    quick = [("🔍 DuckDuckGo", "https://duckduckgo.com/?kp=1"),
+             ("📺 YouTube", "https://youtube.com"),
+             ("📚 Wikipedia", "https://wikipedia.org"),
+             ("🔎 Google", "https://google.com")]
+    btns = "".join(
+        f"<button onclick=\"window.pywebview.api.navigate('{u}')\" "
+        "style=\"font-size:18px;margin:8px;padding:14px 20px;border:0;border-radius:14px;"
+        "background:#fff;color:#2d2a32;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.1)\">"
+        f"{label}</button>" for label, u in quick)
+    return (
+        "<!doctype html><html><head><meta charset='utf-8'></head>"
+        "<body style=\"font-family:'Comic Sans MS',sans-serif;background:#fef6e4;"
+        "text-align:center;padding-top:80px;color:#2d2a32\">"
+        "<div style='font-size:40px'>🌐 My Web</div>"
+        "<div style='margin:24px auto;max-width:620px'>"
+        "<input id='q' placeholder='Search the web…' "
+        "onkeydown=\"if(event.key==='Enter')window.pywebview.api.navigate(document.getElementById('q').value)\" "
+        "style=\"width:70%;font-size:20px;padding:14px 18px;border:0;border-radius:16px;"
+        "box-shadow:0 2px 8px rgba(0,0,0,.12);outline:none\">"
+        "<button onclick=\"window.pywebview.api.navigate(document.getElementById('q').value)\" "
+        "style=\"font-size:20px;padding:14px 22px;margin-left:8px;border:0;border-radius:16px;"
+        "background:#3ecf8e;color:#fff;font-weight:bold;cursor:pointer\">Go</button>"
+        "</div>"
+        f"<div>{btns}</div>"
+        "<script>window.onload=function(){var q=document.getElementById('q');if(q)q.focus();}</script>"
+        "</body></html>")
+
+
 def _page_to_file_url(name, html):
     """Write an HTML page to a real local file and return a file:// URL for it.
     This is the most reliable way to show our own pages in pywebview — it avoids
@@ -128,7 +160,11 @@ class _Api:
         self.window = None
 
     def navigate(self, text):
-        url = HOME_URL if text == "HOME" else normalize_url(text)
+        if text == "HOME":
+            # instant LOCAL home page (no network wait)
+            self.window.load_url(_page_to_file_url("home", _home_html()))
+            return
+        url = normalize_url(text)
         if not url:
             return
         if not url_allowed(self.web_mode, url):
@@ -192,14 +228,9 @@ def run_browser(session):
 
     windowed = "--windowed" in sys.argv
     api = _Api(session, web_mode)
-    # Start with a fast LOCAL page (has a <body> so the toolbar injects reliably
-    # and the kid sees something instantly), then navigate Home in the background
-    # — the window appears immediately instead of waiting on a network page.
-    start = _page_to_file_url("loading",
-        "<!doctype html><html><body style=\"font-family:Comic Sans MS,sans-serif;"
-        "background:#fef6e4;text-align:center;padding-top:120px;color:#8a8694\">"
-        "<h2>Loading the web&#8230; &#127760;</h2></body></html>")
-    # The real site loads in the FULL window (every site works, no framing).
+    # Start DIRECTLY on the fast LOCAL home page — it loads instantly (no network)
+    # so the browser feels immediate. The kid searches / picks a site from there.
+    start = _page_to_file_url("home", _home_html())
     window = webview.create_window("My Web Browser", url=start, js_api=api,
                                    width=1100, height=760, maximized=not windowed)
     api.window = window
@@ -223,25 +254,10 @@ def run_browser(session):
     except Exception:
         pass
 
-    # Navigate to the real Home page via start(func=...): this runs reliably once
-    # the GUI is up, so we don't depend on the 'loaded' event firing for the
-    # local start page (which was leaving it stuck on "Loading the web…").
-    def _go_home():
-        import time as _t
-        _t.sleep(0.6)   # let the window finish creating
-        try:
-            api.navigate("HOME")
-        except Exception as e:
-            print(f"[browser] could not open home: {e}")
-
+    # Home is already the (instant, local) start page — no delayed navigation
+    # needed, so the browser is usable the moment the window appears.
     try:
-        webview.start(_go_home)   # func runs on a worker thread once GUI is up
-    except TypeError:
-        # older pywebview signature
-        try:
-            webview.start(func=_go_home)
-        except Exception as e:
-            _show_browser_error(str(e))
+        webview.start()
     except Exception as e:
         _show_browser_error(str(e))
 
