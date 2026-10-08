@@ -143,10 +143,14 @@ def run_browser(session):
 
     web_mode = session.get("policies", {}).get("web_mode", "")
 
-    # Per-user WebView2 data folder (avoids 0x80080005 under locked profiles).
-    import os, tempfile
+    # PERSISTENT per-user WebView2 data folder (kept under LOCALAPPDATA, NOT
+    # %TEMP%). This lets WebView2 keep its cache between sessions so it starts
+    # fast — a temp folder (wiped on reboot) made it rebuild from scratch every
+    # launch, which is slow.
+    import os
     user = session.get("username", "guest")
-    data_dir = os.path.join(tempfile.gettempdir(), f"fleetbrowser_{user}")
+    base = os.environ.get("LOCALAPPDATA") or os.environ.get("TMP") or os.getcwd()
+    data_dir = os.path.join(base, "FleetBrowser", user)
     try:
         os.makedirs(data_dir, exist_ok=True)
         os.environ["WEBVIEW2_USER_DATA_FOLDER"] = data_dir
@@ -155,14 +159,23 @@ def run_browser(session):
 
     windowed = "--windowed" in sys.argv
     api = _Api(session, web_mode)
-    start = HOME_URL if url_allowed(web_mode, HOME_URL) else "about:blank"
+    # Start with a fast LOCAL page (has a <body> so the toolbar injects reliably
+    # and the kid sees something instantly), then navigate Home in the background
+    # — the window appears immediately instead of waiting on a network page.
+    start = ("data:text/html," + urllib.parse.quote(
+        "<html><body style=\"font-family:Comic Sans MS,sans-serif;background:#fef6e4;"
+        "text-align:center;padding-top:120px;color:#8a8694\">"
+        "<h2>Loading the web… 🌐</h2></body></html>"))
     # The real site loads in the FULL window (every site works, no framing).
     window = webview.create_window("My Web Browser", url=start, js_api=api,
                                    width=1100, height=760, maximized=not windowed)
     api.window = window
 
     # After EVERY page finishes loading: (1) enforce policy on where we landed
-    # (covers link clicks / redirects), and (2) inject the floating toolbar.
+    # (covers link clicks / redirects), (2) inject the floating toolbar, and
+    # (3) on the very first (blank) load, go to Home so the window shows instantly.
+    state = {"went_home": False}
+
     def _on_loaded(w=None):
         try:
             current = window.get_current_url() or ""
@@ -175,6 +188,9 @@ def run_browser(session):
             window.evaluate_js(TOOLBAR_JS)   # draw the search/URL bar on top
         except Exception:
             pass
+        if not state["went_home"]:
+            state["went_home"] = True
+            api.navigate("HOME")    # load the real home page now (window already visible)
     try:
         window.events.loaded += _on_loaded
     except Exception:
