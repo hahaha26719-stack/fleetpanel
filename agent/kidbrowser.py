@@ -58,73 +58,77 @@ def url_allowed(web_mode_value, url):
 
 HOME_URL = "https://duckduckgo.com/?kp=1"
 
-# A kid-friendly toolbar page. It has Back / Forward / Home buttons, a combined
-# SEARCH + URL box, and a big area showing the current page in an <iframe>.
-# The toolbar talks to Python via window.pywebview.api so navigation is
-# policy-checked before loading. (Sites that block framing fall back to opening
-# in the whole window via api.open_top.)
-TOOLBAR_HTML = """
-<!doctype html><html><head><meta charset="utf-8">
-<style>
-  html,body{margin:0;height:100%;font-family:'Comic Sans MS',sans-serif;background:#fef6e4;}
-  #bar{display:flex;gap:8px;align-items:center;padding:10px;background:#5b8cff;}
-  #bar button{font-size:18px;border:0;border-radius:10px;padding:8px 12px;cursor:pointer;background:#fff;color:#2d2a32;}
-  #addr{flex:1;font-size:18px;border:0;border-radius:12px;padding:10px 14px;outline:none;}
-  #go{background:#3ecf8e;color:#fff;font-weight:bold;}
-  #frame{width:100%;height:calc(100% - 60px);border:0;background:#fff;}
-  #msg{padding:40px;text-align:center;color:#8a8694;}
-</style></head><body>
-  <div id="bar">
-    <button onclick="go(-1)">◀</button>
-    <button onclick="go(1)">▶</button>
-    <button onclick="home()">🏠</button>
-    <input id="addr" placeholder="Search the web or type a website…"
-           onkeydown="if(event.key==='Enter')navigate()">
-    <button id="go" onclick="navigate()">🔍 Go</button>
-  </div>
-  <iframe id="frame" src=""></iframe>
-  <div id="msg" style="display:none"></div>
-<script>
-  const frame=document.getElementById('frame');
-  const addr=document.getElementById('addr');
-  const msg=document.getElementById('msg');
-  function navigate(){ window.pywebview.api.navigate(addr.value); }
-  function home(){ window.pywebview.api.navigate('HOME'); }
-  function go(d){ try{ history.go(d); }catch(e){} }
-  // Python calls these:
-  function loadInFrame(url){ msg.style.display='none'; frame.style.display='block'; frame.src=url; addr.value=url; }
-  function showBlocked(){ frame.style.display='none'; msg.style.display='block';
-    msg.innerHTML="<h1>🚫 That page isn't allowed</h1><p>Ask your teacher if you need it.</p>"; }
-  function setAddr(u){ addr.value=u; }
-</script>
-</body></html>
+# A floating toolbar injected into EVERY page via JavaScript after it loads.
+# Because the real site loads in the FULL window (not an iframe), every website
+# works — Google, YouTube, etc. The bar sits fixed on top. Buttons call the
+# pywebview Python API, which policy-checks before navigating the whole window.
+TOOLBAR_JS = r"""
+(function(){
+  if (document.getElementById('__fleetbar')) return;   // only once per page
+  var bar = document.createElement('div');
+  bar.id = '__fleetbar';
+  bar.style.cssText = 'position:fixed;top:0;left:0;right:0;height:52px;z-index:2147483647;'
+    + 'background:#5b8cff;display:flex;gap:8px;align-items:center;padding:6px 10px;'
+    + "font-family:'Comic Sans MS',sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.3);";
+  bar.innerHTML =
+    '<button id="__fb_back">◀</button>'
+    + '<button id="__fb_fwd">▶</button>'
+    + '<button id="__fb_home">🏠</button>'
+    + '<input id="__fb_addr" placeholder="Search the web or type a website…" '
+    + 'style="flex:1;font-size:17px;border:0;border-radius:12px;padding:9px 14px;outline:none;">'
+    + '<button id="__fb_go" style="background:#3ecf8e;color:#fff;font-weight:bold;">🔍 Go</button>';
+  var bstyle='font-size:17px;border:0;border-radius:10px;padding:8px 11px;cursor:pointer;background:#fff;color:#2d2a32;';
+  // push the page down so the bar doesn't cover content
+  var spacer=document.createElement('div'); spacer.style.height='52px';
+  document.documentElement.style.scrollPaddingTop='52px';
+  document.body.insertBefore(bar, document.body.firstChild);
+  document.body.insertBefore(spacer, bar.nextSibling);
+  ['__fb_back','__fb_fwd','__fb_home','__fb_go'].forEach(function(id){
+    document.getElementById(id).style.cssText=bstyle;});
+  var addr=document.getElementById('__fb_addr');
+  addr.value=location.href;
+  function nav(){ window.pywebview.api.navigate(addr.value); }
+  document.getElementById('__fb_go').onclick=nav;
+  addr.addEventListener('keydown',function(e){ if(e.key==='Enter') nav(); });
+  document.getElementById('__fb_back').onclick=function(){ window.pywebview.api.back(); };
+  document.getElementById('__fb_fwd').onclick=function(){ window.pywebview.api.forward(); };
+  document.getElementById('__fb_home').onclick=function(){ window.pywebview.api.navigate('HOME'); };
+})();
 """
 
 
 class _Api:
-    """Bridge the HTML toolbar <-> Python. Navigation is policy-checked here."""
+    """Bridge the injected toolbar <-> Python. Navigation is policy-checked here,
+    then the WHOLE window loads the URL (so every site works, no iframe)."""
     def __init__(self, session, web_mode):
         self.session = session
         self.web_mode = web_mode
         self.window = None
 
     def navigate(self, text):
-        if text == "HOME":
-            url = HOME_URL
-        else:
-            url = normalize_url(text)
+        url = HOME_URL if text == "HOME" else normalize_url(text)
         if not url:
             return
         if not url_allowed(self.web_mode, url):
-            self.window.evaluate_js("showBlocked()")
+            blocked = ("data:text/html," + urllib.parse.quote(
+                "<html><body style=\"font-family:Comic Sans MS,sans-serif;background:#fef6e4;"
+                "text-align:center;padding-top:80px\"><h1>🚫 That page isn't allowed</h1>"
+                "<p>Ask your teacher if you need it.</p></body></html>"))
+            self.window.load_url(blocked)
             return
-        # load the allowed URL inside the toolbar's iframe.
-        # NOTE: some big sites (Google, YouTube, Facebook) refuse to be shown in
-        # an iframe (X-Frame-Options / frame-ancestors). For a kid browser,
-        # curated/educational sites and most search results pages work fine; if
-        # a site shows blank, it's refusing framing, not a policy block.
-        safe = url.replace("\\", "\\\\").replace("'", "\\'")
-        self.window.evaluate_js(f"loadInFrame('{safe}')")
+        self.window.load_url(url)
+
+    def back(self):
+        try:
+            self.window.evaluate_js("history.back()")
+        except Exception:
+            pass
+
+    def forward(self):
+        try:
+            self.window.evaluate_js("history.forward()")
+        except Exception:
+            pass
 
 
 # --------------------------------------------------------------- GUI (WebView2)
@@ -151,20 +155,28 @@ def run_browser(session):
 
     windowed = "--windowed" in sys.argv
     api = _Api(session, web_mode)
-    # Load our toolbar page as the window content; it hosts the address/search
-    # bar and the iframe that shows the actual website.
-    window = webview.create_window("My Web Browser", html=TOOLBAR_HTML, js_api=api,
+    start = HOME_URL if url_allowed(web_mode, HOME_URL) else "about:blank"
+    # The real site loads in the FULL window (every site works, no framing).
+    window = webview.create_window("My Web Browser", url=start, js_api=api,
                                    width=1100, height=760, maximized=not windowed)
     api.window = window
 
-    # Once loaded, navigate to the home page (policy-checked) via the API.
-    def _start_home(w=None):
+    # After EVERY page finishes loading: (1) enforce policy on where we landed
+    # (covers link clicks / redirects), and (2) inject the floating toolbar.
+    def _on_loaded(w=None):
         try:
-            api.navigate("HOME")
+            current = window.get_current_url() or ""
+        except Exception:
+            current = ""
+        if current and current.startswith("http") and not url_allowed(web_mode, current):
+            api.navigate(current)   # redirect to the friendly blocked page
+            return
+        try:
+            window.evaluate_js(TOOLBAR_JS)   # draw the search/URL bar on top
         except Exception:
             pass
     try:
-        window.events.loaded += _start_home
+        window.events.loaded += _on_loaded
     except Exception:
         pass
 
