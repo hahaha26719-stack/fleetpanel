@@ -149,19 +149,17 @@ TOOLBAR_JS = r"""
   document.getElementById('__fb_home').onclick=function(){ window.pywebview.api.navigate('HOME'); };
 
   // Keep EVERYTHING in our window — never let a link spawn the real Edge.
-  // 1) strip target="_blank" from existing + future links
-  function fixLinks(root){
-    (root||document).querySelectorAll('a[target]').forEach(function(a){a.removeAttribute('target');});
-  }
-  fixLinks(document);
-  new MutationObserver(function(muts){muts.forEach(function(m){fixLinks(m.target);});})
-    .observe(document.documentElement,{childList:true,subtree:true});
-  // 2) intercept any click on a _blank link and navigate in-window instead
+  // We do this WITHOUT a MutationObserver (that pegged the CPU to 100% on busy
+  // sites). Instead we intercept clicks at capture time, which needs no DOM
+  // scanning and costs nothing until the user actually clicks.
   document.addEventListener('click',function(e){
     var a=e.target.closest&&e.target.closest('a');
-    if(a&&a.href&&(a.target==='_blank')){ e.preventDefault(); window.pywebview.api.navigate(a.href); }
+    if(a&&a.href){
+      // route new-window links through our in-window, policy-checked nav
+      if(a.target&&a.target!=='_self'){ e.preventDefault(); window.pywebview.api.navigate(a.href); }
+    }
   },true);
-  // 3) override window.open so JS pop-ups route through our policy-checked nav
+  // override window.open so JS pop-ups also stay in-window
   window.open=function(u){ if(u) window.pywebview.api.navigate(u); return null; };
 })();
 """
