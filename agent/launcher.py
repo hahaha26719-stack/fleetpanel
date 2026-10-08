@@ -299,15 +299,67 @@ class Fleet(tk.Tk):
         self.task_apps = tk.Frame(self.taskbar, bg=BAR)
         self.task_apps.pack(side="left", padx=10)
 
-        # right: clock + sign out
+        # right: clock + sign out + (admin) update
         out = tk.Button(self.taskbar, text="Sign out", bg=ERR, fg="white", relief="flat",
                         bd=0, cursor="hand2", font=("Segoe UI", 11, "bold"), padx=14,
                         command=self.on_logout)
         out.pack(side="right", padx=10, pady=8)
+        upd = tk.Button(self.taskbar, text="⟳ Update", bg=BAR, fg=MUT, relief="flat",
+                        bd=0, cursor="hand2", font=("Segoe UI", 10), padx=8,
+                        activebackground=BAR, activeforeground=INK,
+                        command=self._admin_update)
+        upd.pack(side="right", padx=4, pady=8)
         self.clock = tk.Label(self.taskbar, text="", bg=BAR, fg=MUT, font=("Segoe UI", 11), padx=12)
         self.clock.pack(side="right")
         self._tick_clock()
         self._refresh_taskbar()
+
+    def _admin_update(self):
+        """Admin-gated in-app updater: verify an admin password, then pull the
+        latest app files from GitHub into this folder. No command line needed."""
+        from tkinter import simpledialog, messagebox
+        pw = simpledialog.askstring("Update", "Enter a FleetPanel ADMIN password to update:",
+                                    show="•", parent=self)
+        if not pw:
+            return
+        if not self._verify_admin(pw):
+            messagebox.showerror("Update", "Incorrect admin password.", parent=self)
+            return
+        self._set_update_status("Updating… ⟳")
+        threading.Thread(target=self._do_update, daemon=True).start()
+
+    def _set_update_status(self, text):
+        try:
+            self.clock.config(text=text)
+        except Exception:
+            pass
+
+    def _do_update(self):
+        import urllib.request
+        here = os.path.dirname(os.path.abspath(__file__))
+        raw = "https://raw.githubusercontent.com/hahaha26719-stack/fleetpanel/main/agent"
+        files = ["agent.py", "kidcommon.py", "launcher.py", "kidnotepad.py",
+                 "kidppt.py", "kidbrowser.py"]
+        ok = 0
+        for f in files:
+            try:
+                req = urllib.request.Request(f"{raw}/{f}", headers={"User-Agent": "FleetPanel"})
+                with urllib.request.urlopen(req, timeout=20) as r:
+                    data = r.read()
+                with open(os.path.join(here, f), "wb") as out:
+                    out.write(data)
+                ok += 1
+            except Exception as e:
+                print(f"[update] {f} failed: {e}")
+        from tkinter import messagebox
+        def done():
+            self._set_update_status("")
+            self._tick_clock()
+            messagebox.showinfo("Update",
+                                f"Updated {ok}/{len(files)} files.\n"
+                                "Sign out and back in to use the new version.",
+                                parent=self)
+        self.after(0, done)
 
     def _tick_clock(self):
         try:
