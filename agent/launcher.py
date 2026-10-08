@@ -332,14 +332,48 @@ class Fleet(tk.Tk):
         self.after(1200, self._refresh_taskbar)
 
     def _raise_app(self, o):
-        # Best-effort: drop our topmost so the app can come forward. (The OS keeps
-        # each app as its own window; clicking its taskbar button here just lets
-        # it surface above the home screen.)
+        """Restore + bring the app's window to the front (real taskbar behavior).
+        Finds the top-level window(s) owned by the app's process and uses the
+        Win32 API to un-minimize and foreground it."""
+        # Drop our own topmost first so the app can actually come forward.
         try:
             if not WINDOWED:
                 self.attributes("-topmost", False)
         except Exception:
             pass
+        pid = None
+        try:
+            pid = o["proc"].pid
+        except Exception:
+            return
+        if os.name != "nt":
+            return  # Win32-only; on test boxes there's nothing to raise
+        try:
+            import ctypes
+            from ctypes import wintypes
+            user32 = ctypes.windll.user32
+            SW_RESTORE = 9
+
+            EnumWindows = user32.EnumWindows
+            EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+            GetWindowThreadProcessId = user32.GetWindowThreadProcessId
+            IsWindowVisible = user32.IsWindowVisible
+
+            targets = []
+
+            def _cb(hwnd, lparam):
+                wpid = wintypes.DWORD()
+                GetWindowThreadProcessId(hwnd, ctypes.byref(wpid))
+                if wpid.value == pid and IsWindowVisible(hwnd):
+                    targets.append(hwnd)
+                return True
+
+            EnumWindows(EnumWindowsProc(_cb), 0)
+            for hwnd in targets:
+                user32.ShowWindow(hwnd, SW_RESTORE)   # un-minimize
+                user32.SetForegroundWindow(hwnd)      # bring to front
+        except Exception as e:
+            print(f"[launcher] could not raise app window: {e}")
 
     def _open_app(self, script, label, emoji):
         here = os.path.dirname(os.path.abspath(__file__))
