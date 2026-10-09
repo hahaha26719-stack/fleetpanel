@@ -254,26 +254,20 @@ def run_browser(session):
     # THROTTLED: some sites (SPAs) fire 'loaded' rapidly; without a guard that
     # pegs the CPU re-checking the URL and re-injecting JS. We run at most once
     # per URL and no more often than every 1.5s.
-    import time as _time
+    import time as _time, threading as _th
     guard = {"last_url": None, "last_t": 0.0, "busy": False}
 
-    def _on_loaded(w=None):
-        if guard["busy"]:
-            return
-        now = _time.time()
-        if now - guard["last_t"] < 1.5:
-            return
-        guard["busy"] = True
+    def _handle_loaded():
+        # Runs on a WORKER thread so it never blocks the webview's UI/event
+        # thread (that caused the app to freeze — "Not Responding", 0% CPU).
         try:
             try:
                 current = window.get_current_url() or ""
             except Exception:
                 current = ""
-            # skip if the URL hasn't actually changed since last time
             if current and current == guard["last_url"]:
                 return
             guard["last_url"] = current
-            guard["last_t"] = now
             if current and current.startswith("http") and not url_allowed(web_mode, current):
                 api._show_blocked(current)
                 return
@@ -283,6 +277,15 @@ def run_browser(session):
                 pass
         finally:
             guard["busy"] = False
+
+    def _on_loaded(w=None):
+        # cheap + non-blocking: throttle, then hand off to a worker thread.
+        now = _time.time()
+        if guard["busy"] or (now - guard["last_t"] < 1.5):
+            return
+        guard["busy"] = True
+        guard["last_t"] = now
+        _th.Thread(target=_handle_loaded, daemon=True).start()
     try:
         window.events.loaded += _on_loaded
     except Exception:
