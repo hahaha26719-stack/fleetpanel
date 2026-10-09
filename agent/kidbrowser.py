@@ -173,10 +173,26 @@ class _Api:
         self.web_mode = web_mode
         self.window = None
 
+    def _reinject_soon(self):
+        """After a navigation, re-add the toolbar once the new page loads.
+        Runs on a worker thread with a couple of gentle attempts — NOT tied to
+        the webview load event (which caused CPU/freeze/crash)."""
+        import threading, time
+        def work():
+            for delay in (1.0, 2.0):
+                time.sleep(delay)
+                try:
+                    self.window.evaluate_js(TOOLBAR_JS)
+                    return
+                except Exception:
+                    pass
+        threading.Thread(target=work, daemon=True).start()
+
     def navigate(self, text):
         if text == "HOME":
             # instant LOCAL home page (no network wait)
             self.window.load_url(_page_to_file_url("home", _home_html()))
+            self._reinject_soon()
             return
         url = normalize_url(text)
         if not url:
@@ -185,6 +201,7 @@ class _Api:
             self._show_blocked(url)
             return
         self.window.load_url(url)
+        self._reinject_soon()
 
     def _show_blocked(self, url):
         host = host_of(url) or url
@@ -254,42 +271,24 @@ def run_browser(session):
     # THROTTLED: some sites (SPAs) fire 'loaded' rapidly; without a guard that
     # pegs the CPU re-checking the URL and re-injecting JS. We run at most once
     # per URL and no more often than every 1.5s.
-    import time as _time, threading as _th
-    guard = {"last_url": None, "last_t": 0.0, "busy": False}
+    # NOTE: we deliberately do NOT hook the webview 'loaded' event. Repeatedly
+    # calling get_current_url()/evaluate_js() from that event caused high CPU,
+    # freezes, and crashes on modern SPA sites. Instead:
+    #   * the toolbar is injected ONCE, shortly after startup, and it RE-INJECTS
+    #     itself on its own pages via a lightweight in-page check;
+    #   * policy is enforced at NAVIGATION time (api.navigate), where the kid
+    #     actually goes somewhere, which is where it matters.
+    import threading as _th, time as _time
 
-    def _handle_loaded():
-        # Runs on a WORKER thread so it never blocks the webview's UI/event
-        # thread (that caused the app to freeze — "Not Responding", 0% CPU).
-        try:
-            try:
-                current = window.get_current_url() or ""
-            except Exception:
-                current = ""
-            if current and current == guard["last_url"]:
-                return
-            guard["last_url"] = current
-            if current and current.startswith("http") and not url_allowed(web_mode, current):
-                api._show_blocked(current)
-                return
+    def _inject_once():
+        _time.sleep(1.2)                 # let the first page settle
+        for _ in range(3):               # a few gentle attempts, then stop
             try:
                 window.evaluate_js(TOOLBAR_JS)
+                break
             except Exception:
-                pass
-        finally:
-            guard["busy"] = False
-
-    def _on_loaded(w=None):
-        # cheap + non-blocking: throttle, then hand off to a worker thread.
-        now = _time.time()
-        if guard["busy"] or (now - guard["last_t"] < 1.5):
-            return
-        guard["busy"] = True
-        guard["last_t"] = now
-        _th.Thread(target=_handle_loaded, daemon=True).start()
-    try:
-        window.events.loaded += _on_loaded
-    except Exception:
-        pass
+                _time.sleep(1.0)
+    _th.Thread(target=_inject_once, daemon=True).start()
 
     # Home is already the (instant, local) start page — no delayed navigation
     # needed, so the browser is usable the moment the window appears.
