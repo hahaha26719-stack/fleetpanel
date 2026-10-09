@@ -300,6 +300,12 @@ POLICIES = [
     # =============================================================== Privacy
     _reg_bool("disable_telemetry", "Disable telemetry / diagnostic data", "Privacy",
               "HKLM", r"SOFTWARE\Policies\Microsoft\Windows\DataCollection", "AllowTelemetry", on=0, off=3),
+    {"key": "stop_diagtrack",
+     "label": "Stop & disable the DiagTrack telemetry SERVICE (fixes high CPU)",
+     "category": "Privacy", "type": "bool",
+     "apply": {"kind": "registry", "hive": "HKLM",
+               "path": r"SYSTEM\CurrentControlSet\Services\DiagTrack",
+               "name": "Start", "on": 4, "off": 2, "regtype": "REG_DWORD"}},
     _reg_bool("disable_advertising_id", "Disable advertising ID", "Privacy",
               "HKLM", r"SOFTWARE\Policies\Microsoft\Windows\AdvertisingInfo", "DisabledByGroupPolicy"),
     _reg_bool("disable_location", "Disable location services", "Privacy",
