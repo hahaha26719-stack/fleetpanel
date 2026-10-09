@@ -161,6 +161,16 @@ TOOLBAR_JS = r"""
   },true);
   // override window.open so JS pop-ups also stay in-window
   window.open=function(u){ if(u) window.pywebview.api.navigate(u); return null; };
+
+  // ---- Lightweight ad/heavy-content blocker (big CPU saver on weak PCs) ----
+  // Runs ONCE (no polling loop). Hides common ad/iframe containers and pauses
+  // autoplaying media. This cuts the rendering/animation work that pegs the CPU.
+  try{
+    var killSel=['iframe[src*="ads"]','iframe[src*="doubleclick"]','iframe[src*="googlesyndication"]',
+      '.ad','.ads','.advert','[id*="google_ads"]','[class*="sponsor"]','ins.adsbygoogle'];
+    document.querySelectorAll(killSel.join(',')).forEach(function(el){el.remove();});
+    document.querySelectorAll('video,audio').forEach(function(m){try{m.autoplay=false;m.pause();}catch(e){}});
+  }catch(e){}
 })();
 """
 
@@ -256,6 +266,19 @@ def run_browser(session):
         os.environ["WEBVIEW2_USER_DATA_FOLDER"] = data_dir
     except Exception:
         pass
+
+    # ---- WebView2 performance flags for WEAK hardware ----
+    # Block autoplaying video/audio (a huge CPU hog), cut background work, and
+    # ease rendering load. These are Chromium flags passed to the engine.
+    os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = (
+        "--autoplay-policy=user-gesture-required "   # no autoplay video = big CPU save
+        "--disable-background-timer-throttling "
+        "--disable-features=Translate,BackForwardCache "
+        "--disable-renderer-backgrounding "
+        "--disable-smooth-scrolling "
+        "--disable-background-networking "
+        "--blink-settings=imagesEnabled=true"
+    )
 
     windowed = "--windowed" in sys.argv
     api = _Api(session, web_mode)
