@@ -199,8 +199,16 @@ class _Api:
         threading.Thread(target=work, daemon=True).start()
 
     def navigate(self, text):
+        # IMPORTANT: this is called from the webview's JS bridge thread. Doing
+        # load_url() directly here blocks that thread and freezes the app
+        # ("Not Responding"). So we return immediately and do the actual
+        # navigation on a worker thread.
+        import threading
+        threading.Thread(target=self._navigate_worker, args=(text,), daemon=True).start()
+        return None
+
+    def _navigate_worker(self, text):
         if text == "HOME":
-            # instant LOCAL home page (no network wait)
             self.window.load_url(_page_to_file_url("home", _home_html()))
             self._reinject_soon()
             return
@@ -229,14 +237,18 @@ class _Api:
         self.window.load_url(_page_to_file_url("blocked", page))
 
     def back(self):
-        try:
-            self.window.evaluate_js("history.back()")
-        except Exception:
-            pass
+        import threading
+        threading.Thread(target=lambda: self._safe_js("history.back()"), daemon=True).start()
+        return None
 
     def forward(self):
+        import threading
+        threading.Thread(target=lambda: self._safe_js("history.forward()"), daemon=True).start()
+        return None
+
+    def _safe_js(self, code):
         try:
-            self.window.evaluate_js("history.forward()")
+            self.window.evaluate_js(code)
         except Exception:
             pass
 
