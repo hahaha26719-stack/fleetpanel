@@ -500,15 +500,23 @@ def wipe_local_user_data():
         except Exception:
             pass
 
-    for sub in ("roaming", "userfiles"):
-        d = os.path.join(STATE_DIR, sub)
+    # Directories to wipe: the agent's roaming/userfiles AND the per-user
+    # browser profile (so one kid's history/logins never carry to the next —
+    # important since users share a kiosk PC but must stay isolated).
+    targets = [os.path.join(STATE_DIR, "roaming"),
+               os.path.join(STATE_DIR, "userfiles")]
+    _lad = os.environ.get("LOCALAPPDATA")
+    if _lad:
+        targets.append(os.path.join(_lad, "FleetBrowser"))   # all browser profiles
+
+    for d in targets:
         if not os.path.isdir(d):
             continue
         # First try to remove the whole tree, tolerating errors.
         try:
             shutil.rmtree(d, onerror=_on_rm_error)
         except Exception as e:
-            print(f"[agent] rmtree {sub} had issues: {e}")
+            print(f"[agent] rmtree {d} had issues: {e}")
         # If anything survived (locked files), delete what we can file-by-file
         # so the folder is emptied as much as possible.
         if os.path.isdir(d):
