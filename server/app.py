@@ -328,7 +328,7 @@ def _openverse_search(query):
            + _urlparse.quote(query)
            + f"&page_size={_PIC_MAX}&mature=false&license_type=all")
     req = _urlreq.Request(url, headers={"User-Agent": "FleetPanel/1.0"})
-    with _urlreq.urlopen(req, timeout=15) as r:
+    with _urlreq.urlopen(req, timeout=8) as r:   # fail fast, don't hang the kid
         data = _json.loads(r.read())
     out = []
     for item in data.get("results", [])[:_PIC_MAX]:
@@ -339,6 +339,45 @@ def _openverse_search(query):
             "source": item.get("source", ""),
         })
     return out
+
+
+def _wikimedia_search(query):
+    """Fast, no-auth fallback image source (Wikimedia Commons). Used if
+    Openverse is slow/unavailable so picture search still works."""
+    url = ("https://commons.wikimedia.org/w/api.php?action=query&format=json"
+           "&generator=search&gsrnamespace=6&gsrlimit=" + str(_PIC_MAX)
+           + "&gsrsearch=" + _urlparse.quote(query)
+           + "&prop=imageinfo&iiprop=url&iiurlwidth=320")
+    req = _urlreq.Request(url, headers={"User-Agent": "FleetPanel/1.0"})
+    with _urlreq.urlopen(req, timeout=8) as r:
+        data = _json.loads(r.read())
+    out = []
+    pages = (data.get("query") or {}).get("pages") or {}
+    for p in list(pages.values())[:_PIC_MAX]:
+        info = (p.get("imageinfo") or [{}])[0]
+        src = info.get("thumburl") or info.get("url")
+        if src:
+            out.append({"title": p.get("title", "").replace("File:", "")[:120],
+                        "thumbnail": src, "url": info.get("url") or src,
+                        "source": "wikimedia"})
+    return out
+
+
+def _image_search(query):
+    """Wikimedia Commons FIRST (fast, no-auth, reliable), then Openverse as a
+    backup. Openverse was frequently timing out, which made picture search fail,
+    so it's no longer the primary source."""
+    try:
+        res = _wikimedia_search(query)
+        if res:
+            return res
+    except Exception as e:
+        print(f"[pictures] wikimedia failed: {e}")
+    try:
+        return _openverse_search(query)
+    except Exception as e:
+        print(f"[pictures] openverse failed: {e}")
+    return []
 
 
 @app.route("/api/pictures/<username>", methods=["GET"])
@@ -364,9 +403,9 @@ def api_pictures(username):
     if key in _PIC_CACHE and now - _PIC_CACHE[key][0] < _PIC_CACHE_TTL:
         return jsonify({"results": _PIC_CACHE[key][1], "cached": True})
     try:
-        results = _openverse_search(query)
+        results = _image_search(query)
     except Exception as e:
-        return jsonify({"results": [], "message": f"Search is busy, try again. ({e})"}), 200
+        return jsonify({"results": [], "message": "Search is busy — please try again. 🙂"}), 200
     _PIC_CACHE[key] = (now, results)
     # keep cache from growing unbounded on a small board
     if len(_PIC_CACHE) > 200:
