@@ -143,21 +143,17 @@ class KidSlides(tk.Tk):
         self.title_entry.pack(fill="x", ipady=6, pady=(0, 8))
         self.title_entry.bind("<KeyRelease>", lambda e: self._store_slide())
 
-        tk.Label(right, text="Text", bg=kc.PANEL, fg=kc.MUT, font=(kc.FONT, 11)).pack(anchor="w")
-        self.body_text = tk.Text(right, font=(kc.FONT, 16), wrap="word", bg="white",
-                                fg=kc.INK, relief="flat", height=10, padx=8, pady=6)
-        self.body_text.pack(expand=True, fill="both")
-        self.body_text.bind("<KeyRelease>", lambda e: self._store_slide())
+        # IMPORTANT pack order: pack the PICTURE AREA to the BOTTOM first so it
+        # reserves its height, THEN let the text box expand into the middle.
+        # (Previously the text's expand=True ate all space and squeezed the
+        # picture canvas to nothing — images only appeared in Present.)
 
-        self.extras = tk.Label(right, text="", bg=kc.PANEL, fg=kc.MUT,
-                               font=(kc.FONT, 10), justify="left", anchor="w")
-        self.extras.pack(fill="x", pady=(4, 0))
-
-        # DRAGGABLE picture area: pictures live on this canvas and can be moved
-        # by dragging. Click a picture to select it, then use the buttons to
-        # resize it bigger/smaller or delete it. x/y + size saved per picture.
+        # --- picture area (packed to bottom) ---
+        self.pic_canvas = tk.Canvas(right, bg="white", height=210, highlightthickness=1,
+                                    highlightbackground=kc.LINE if hasattr(kc, "LINE") else "#ddd")
+        self.pic_canvas.pack(side="bottom", fill="x", pady=(2, 4))
         pichdr = tk.Frame(right, bg=kc.PANEL)
-        pichdr.pack(fill="x", pady=(6, 0))
+        pichdr.pack(side="bottom", fill="x", pady=(6, 0))
         tk.Label(pichdr, text="Pictures (click to select, drag to move):", bg=kc.PANEL,
                  fg=kc.MUT, font=(kc.FONT, 10)).pack(side="left")
         tk.Button(pichdr, text="🗑 Delete", bg=kc.RED, fg="white", relief="flat",
@@ -169,9 +165,16 @@ class KidSlides(tk.Tk):
         tk.Button(pichdr, text="➕", bg=kc.GREEN, fg="white", relief="flat",
                   cursor="hand2", font=(kc.FONT, 9, "bold"), padx=8,
                   command=lambda: self._pic_resize(1.25)).pack(side="right", padx=2)
-        self.pic_canvas = tk.Canvas(right, bg="white", height=200, highlightthickness=1,
-                                    highlightbackground=kc.LINE if hasattr(kc, "LINE") else "#ddd")
-        self.pic_canvas.pack(fill="x", pady=(2, 4))
+        self.extras = tk.Label(right, text="", bg=kc.PANEL, fg=kc.MUT,
+                               font=(kc.FONT, 10), justify="left", anchor="w")
+        self.extras.pack(side="bottom", fill="x", pady=(4, 0))
+
+        # --- title + text (fill the remaining middle) ---
+        tk.Label(right, text="Text", bg=kc.PANEL, fg=kc.MUT, font=(kc.FONT, 11)).pack(anchor="w")
+        self.body_text = tk.Text(right, font=(kc.FONT, 16), wrap="word", bg="white",
+                                fg=kc.INK, relief="flat", height=8, padx=8, pady=6)
+        self.body_text.pack(expand=True, fill="both")
+        self.body_text.bind("<KeyRelease>", lambda e: self._store_slide())
         self._selected_pic = None   # currently selected picture dict
         self._thumb_refs = []        # keep PhotoImage refs alive
         self._canvas_items = {}      # canvas_id -> picture dict
