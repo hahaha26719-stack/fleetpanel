@@ -184,21 +184,28 @@ class _Api:
         self.window = None
 
     def _reinject_soon(self):
-        """After a navigation, add the toolbar once the new page is ready.
-        SINGLE-FLIGHT (only one runs at a time, so evaluate_js calls can't stack
-        and stall the app), but with a few spaced attempts because real websites
-        aren't ready at a fixed moment — the toolbar JS itself is idempotent
-        (returns early if the bar already exists), so re-tries are harmless."""
+        """After a navigation: (1) RE-CHECK the final URL against policy — this
+        catches server-side REDIRECTS (e.g. gmail.com -> accounts.google.com),
+        which the navigation-time check alone misses; and (2) add the toolbar.
+        SINGLE-FLIGHT so evaluate_js calls can't stack and stall the app; a few
+        spaced attempts because pages aren't ready at a fixed moment."""
         import threading, time
         if getattr(self, "_injecting", False):
             return
         self._injecting = True
         def work():
             try:
-                # spaced attempts so the bar appears on fast AND slow pages,
-                # without piling up (we're the only injector running).
                 for delay in (0.6, 1.5, 3.0):
                     time.sleep(delay)
+                    # (1) where did we actually end up? block redirects too.
+                    try:
+                        cur = self.window.get_current_url() or ""
+                    except Exception:
+                        cur = ""
+                    if cur.startswith("http") and not url_allowed(self.web_mode, cur):
+                        self._show_blocked(cur)
+                        return   # stop; we've shown the blocked page
+                    # (2) draw the toolbar (idempotent, safe to retry)
                     try:
                         self.window.evaluate_js(TOOLBAR_JS)
                     except Exception:
