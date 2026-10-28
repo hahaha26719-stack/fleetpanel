@@ -39,13 +39,135 @@ class KidNotepad(tk.Tk):
                           font=(kc.FONT, 22, "bold"))
         header.pack(pady=(14, 6))
 
-        nb = ttk.Notebook(self)
-        nb.pack(expand=True, fill="both", padx=14, pady=10)
+        # main area: notebook on the LEFT, (hidden) AI side panel on the RIGHT
+        main = tk.Frame(self, bg=kc.BG)
+        main.pack(expand=True, fill="both", padx=14, pady=10)
+        nb = ttk.Notebook(main)
+        nb.pack(side="left", expand=True, fill="both")
         self.nb = nb
+        self._main = main
         self._build_write(nb)
         self._build_files(nb)
         self._build_pictures(nb)
         self._build_together(nb)
+
+        # ---- hidden AI assistant trigger ----
+        # Ctrl+Alt+7 "arms" secret mode; then typing the word aiservice reveals
+        # the AI chat side panel. Nothing visible happens on the key combo.
+        self._secret_armed = False
+        self._secret_buf = ""
+        self._ai_panel = None
+        self.bind_all("<Control-Alt-Key-7>", self._arm_secret)
+        self.bind_all("<Key>", self._secret_keys)
+
+    # ===================================================== hidden AI assistant
+    def _arm_secret(self, event=None):
+        # Ctrl+Alt+7 pressed — arm secret mode. Nothing visible happens.
+        self._secret_armed = True
+        self._secret_buf = ""
+        return "break"
+
+    def _secret_keys(self, event=None):
+        # While armed, collect typed letters; if they spell 'aiservice', reveal.
+        if not self._secret_armed:
+            return
+        ch = event.char
+        if ch and ch.isprintable():
+            self._secret_buf = (self._secret_buf + ch.lower())[-12:]
+            if self._secret_buf.endswith("aiservice"):
+                self._secret_armed = False
+                self._secret_buf = ""
+                self._reveal_ai()
+
+    def _reveal_ai(self):
+        if self._ai_panel is not None:
+            return   # already open
+        # a draggable divider + the AI panel on the right
+        self._divider = tk.Frame(self._main, bg=kc.LINE if hasattr(kc, "LINE") else "#ccc",
+                                 width=6, cursor="sb_h_double_arrow")
+        self._divider.pack(side="left", fill="y")
+        self._divider.bind("<B1-Motion>", self._resize_ai)
+
+        self._ai_panel = tk.Frame(self._main, bg=kc.PANEL, width=340)
+        self._ai_panel.pack(side="left", fill="y")
+        self._ai_panel.pack_propagate(False)
+
+        top = tk.Frame(self._ai_panel, bg=kc.PRIMARY)
+        top.pack(fill="x")
+        tk.Label(top, text="🤖 AI Helper", bg=kc.PRIMARY, fg="white",
+                 font=(kc.FONT, 13, "bold")).pack(side="left", padx=8, pady=6)
+        tk.Button(top, text="✕", bg=kc.PRIMARY, fg="white", relief="flat", bd=0,
+                  cursor="hand2", font=(kc.FONT, 11, "bold"),
+                  command=self._close_ai).pack(side="right", padx=6)
+
+        self.ai_log = tk.Text(self._ai_panel, bg="white", fg=kc.INK, wrap="word",
+                              font=(kc.FONT, 11), relief="flat", padx=8, pady=6,
+                              state="disabled")
+        self.ai_log.pack(expand=True, fill="both", padx=6, pady=6)
+
+        entry_row = tk.Frame(self._ai_panel, bg=kc.PANEL)
+        entry_row.pack(fill="x", padx=6, pady=(0, 8))
+        self.ai_entry = tk.Entry(entry_row, font=(kc.FONT, 12), bg="white", fg=kc.INK,
+                                 relief="flat")
+        self.ai_entry.pack(side="left", expand=True, fill="x", ipady=6)
+        self.ai_entry.bind("<Return>", lambda e: self._ai_send())
+        tk.Button(entry_row, text="Send", bg=kc.GREEN, fg="white", relief="flat",
+                  cursor="hand2", font=(kc.FONT, 11, "bold"), padx=10,
+                  command=self._ai_send).pack(side="left", padx=(6, 0))
+
+        self._ai_history = []   # [{role, content}]
+        self._ai_say("ai", "Hi! Ask me anything about your schoolwork. 🙂")
+
+    def _resize_ai(self, event):
+        # drag the divider to adjust the panel width
+        try:
+            new_w = self._main.winfo_width() - (event.x_root - self._main.winfo_rootx())
+            new_w = max(220, min(700, new_w))
+            self._ai_panel.config(width=new_w)
+        except Exception:
+            pass
+
+    def _close_ai(self):
+        for w in (getattr(self, "_divider", None), self._ai_panel):
+            try:
+                if w:
+                    w.destroy()
+            except Exception:
+                pass
+        self._ai_panel = None
+
+    def _ai_say(self, who, text):
+        self.ai_log.config(state="normal")
+        tag = "You: " if who == "you" else "🤖 "
+        self.ai_log.insert("end", f"{tag}{text}\n\n")
+        self.ai_log.see("end")
+        self.ai_log.config(state="disabled")
+
+    def _ai_send(self):
+        msg = self.ai_entry.get().strip()
+        if not msg:
+            return
+        self.ai_entry.delete(0, "end")
+        self._ai_say("you", msg)
+        self._ai_history.append({"role": "user", "content": msg})
+        self._ai_say("ai", "…thinking…")
+        threading.Thread(target=self._ai_worker, daemon=True).start()
+
+    def _ai_worker(self):
+        status, data = kc.api(self.session, "POST", "/api/ai",
+                              json_body={"messages": self._ai_history}, timeout=70)
+        reply = (data.get("reply") if isinstance(data, dict) else None) \
+            or "Sorry, I couldn't answer right now."
+        def show():
+            # replace the "…thinking…" line with the real reply
+            self.ai_log.config(state="normal")
+            # remove last two lines (the thinking placeholder + blank)
+            self.ai_log.delete("end-3l", "end")
+            self.ai_log.insert("end", "\n")
+            self.ai_log.config(state="disabled")
+            self._ai_say("ai", reply)
+            self._ai_history.append({"role": "assistant", "content": reply})
+        self.after(0, show)
 
     # ------------------------------------------------------------- 1. Write
     def _build_write(self, nb):

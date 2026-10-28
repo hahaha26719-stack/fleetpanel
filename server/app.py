@@ -515,6 +515,57 @@ def api_room_post(code):
     return jsonify({"ok": True, "version": r["version"]})
 
 
+# ================================================================= AI ASSISTANT
+# Hidden per-session assistant for the kid Notepad. The PC talks ONLY to the Pi;
+# the Pi calls Hugging Face with the token kept in .env (FLEET_HF_TOKEN), so the
+# key never reaches a kid PC and it works even behind the web block. A light
+# kid-safe system prompt is always prepended.
+_HF_MODEL = os.environ.get("FLEET_HF_MODEL", "meta-llama/Llama-3.2-3B-Instruct")
+_AI_SYSTEM = (
+    "You are a friendly, concise homework helper for a child using a school "
+    "notepad. Keep answers short, clear, age-appropriate and encouraging. "
+    "Refuse anything unsafe, adult, violent, hateful, or inappropriate for "
+    "children, and gently steer back to schoolwork."
+)
+
+
+@app.route("/api/ai", methods=["POST"])
+def api_ai():
+    _agent_auth()
+    token = os.environ.get("FLEET_HF_TOKEN", "")
+    if not token:
+        return jsonify({"reply": "AI isn't set up yet (no server token)."}), 200
+    data = request.get_json(force=True, silent=True) or {}
+    msgs = data.get("messages") or []
+    # keep it bounded + prepend the kid-safe system prompt
+    history = [{"role": "system", "content": _AI_SYSTEM}]
+    for m in msgs[-10:]:
+        role = m.get("role")
+        if role in ("user", "assistant") and m.get("content"):
+            history.append({"role": role, "content": str(m["content"])[:2000]})
+    payload = _json.dumps({
+        "model": _HF_MODEL,
+        "messages": history,
+        "max_tokens": 400,
+        "temperature": 0.6,
+    }).encode()
+    req = _urlreq.Request(
+        "https://router.huggingface.co/v1/chat/completions",
+        data=payload, method="POST",
+        headers={"Authorization": f"Bearer {token}",
+                 "Content-Type": "application/json"})
+    try:
+        with _urlreq.urlopen(req, timeout=60) as r:
+            resp = _json.loads(r.read())
+        reply = (resp.get("choices") or [{}])[0].get("message", {}).get("content", "").strip()
+        if not reply:
+            reply = "Hmm, I didn't get an answer. Try asking again."
+        return jsonify({"reply": reply})
+    except Exception as e:
+        # free tier can be slow/warming up — give a friendly, honest message
+        return jsonify({"reply": f"The assistant is busy or warming up — try again in a moment. ({e})"}), 200
+
+
 # ---- roaming data sync (very simple last-write-wins per relpath) --------------
 def _user_data_dir(user_id):
     d = os.path.join(models.DATA_DIR, str(user_id))
