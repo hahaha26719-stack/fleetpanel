@@ -382,9 +382,37 @@ class Fleet(tk.Tk):
         self.after(0, done)
 
     def _tick_clock(self):
+        # SINGLE-INSTANCE guard: never start a second clock loop (it was being
+        # started from two places, stacking after() callbacks over time).
+        if getattr(self, "_clock_running", False):
+            try:
+                self.clock.config(text=time.strftime("%I:%M %p"))
+            except Exception:
+                pass
+            return
+        self._clock_running = True
+        self._clock_tick()
+
+    def _clock_tick(self):
         try:
             self.clock.config(text=time.strftime("%I:%M %p"))
-            self.after(10000, self._tick_clock)
+        except Exception:
+            pass
+        # Re-assert the kiosk lock every tick so the launcher can NEVER be left
+        # closable/behind, even if something dropped topmost/fullscreen.
+        self._reassert_lock()
+        self.after(5000, self._clock_tick)
+
+    def _reassert_lock(self):
+        if WINDOWED:
+            return
+        try:
+            self.protocol("WM_DELETE_WINDOW", lambda: self.bell())
+            # only force fullscreen/topmost when NO child app is in front, so we
+            # don't yank focus away from an open app the kid is using.
+            if not getattr(self, "_open", None):
+                self.attributes("-fullscreen", True)
+                self.attributes("-topmost", True)
         except Exception:
             pass
 
