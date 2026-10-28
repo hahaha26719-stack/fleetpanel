@@ -153,10 +153,19 @@ class KidSlides(tk.Tk):
                                font=(kc.FONT, 10), justify="left", anchor="w")
         self.extras.pack(fill="x", pady=(4, 0))
 
-        # picture thumbnails shown under the editor
-        self.pic_preview = tk.Frame(right, bg=kc.PANEL)
-        self.pic_preview.pack(fill="x", pady=(4, 0))
-        self._thumb_refs = []   # keep PhotoImage refs alive
+        # DRAGGABLE picture area: pictures live on this canvas and can be moved
+        # around by dragging. Their x/y is saved per picture in the slide.
+        tk.Label(right, text="Pictures (drag to move):", bg=kc.PANEL, fg=kc.MUT,
+                 font=(kc.FONT, 10)).pack(anchor="w", pady=(6, 0))
+        self.pic_canvas = tk.Canvas(right, bg="white", height=180, highlightthickness=1,
+                                    highlightbackground=kc.LINE if hasattr(kc, "LINE") else "#ddd")
+        self.pic_canvas.pack(fill="x", pady=(2, 4))
+        self._thumb_refs = []        # keep PhotoImage refs alive
+        self._canvas_items = {}      # canvas_id -> picture dict
+        self._drag = {"id": None, "dx": 0, "dy": 0}
+        self.pic_canvas.bind("<Button-1>", self._canvas_press)
+        self.pic_canvas.bind("<B1-Motion>", self._canvas_drag)
+        self.pic_canvas.bind("<ButtonRelease-1>", self._canvas_release)
 
         self.counter = tk.Label(right, text="", bg=kc.PANEL, fg=kc.MUT, font=(kc.FONT, 11))
         self.counter.pack(anchor="e")
@@ -194,43 +203,78 @@ class KidSlides(tk.Tk):
         self._refresh_slide_list()
 
     def _render_thumbs(self, s):
-        """Show the ACTUAL picture thumbnails under the editor (needs Pillow)."""
-        for w in self.pic_preview.winfo_children():
-            w.destroy()
+        """Draw each picture on the drag canvas at its stored x/y. Pictures can
+        be dragged to reposition; the new x/y is saved to the slide."""
+        self.pic_canvas.delete("all")
         self._thumb_refs = []
+        self._canvas_items = {}
         if not s["pictures"]:
+            self.pic_canvas.create_text(90, 20, text="(no pictures — use 🖼 Picture)",
+                                        fill=kc.MUT, font=(kc.FONT, 9), anchor="w")
             return
-        tk.Label(self.pic_preview, text="Pictures on this slide:", bg=kc.PANEL,
-                 fg=kc.MUT, font=(kc.FONT, 10)).pack(anchor="w")
-        row = tk.Frame(self.pic_preview, bg=kc.PANEL)
-        row.pack(anchor="w")
         for p in s["pictures"]:
-            cell = tk.Frame(row, bg=kc.PANEL)
-            cell.pack(side="left", padx=6, pady=4)
-            lbl = tk.Label(cell, text="🖼 " + (p.get("title", "pic")[:14]),
-                           bg=kc.PANEL, fg=kc.MUT, font=(kc.FONT, 9))
-            lbl.pack()
-            # fetch the real image in the background, then swap it in
-            threading.Thread(target=self._load_thumb, args=(p, lbl), daemon=True).start()
+            p.setdefault("x", 40); p.setdefault("y", 40)
+            # placeholder text until the image loads
+            cid = self.pic_canvas.create_text(p["x"], p["y"], text="🖼 " + p.get("title", "pic")[:14],
+                                              fill=kc.MUT, font=(kc.FONT, 9), anchor="nw", tags="pic")
+            self._canvas_items[cid] = p
+            threading.Thread(target=self._load_thumb, args=(p, cid), daemon=True).start()
 
-    def _load_thumb(self, p, lbl):
-        # Check Pillow up front so we can explain if the image can't render.
+    def _load_thumb(self, p, cid):
         try:
             import PIL  # noqa
             has_pillow = True
         except Exception:
             has_pillow = False
-        img = kc.fetch_image(self.session, p.get("url", ""), max_w=160, max_h=120)
+        img = kc.fetch_image(self.session, p.get("url", ""), max_w=140, max_h=110)
         def swap():
+            if not self.pic_canvas.winfo_exists():
+                return
             if img is not None:
                 self._thumb_refs.append(img)
                 try:
-                    lbl.config(image=img, text="")
+                    # replace the placeholder text with the real image at x/y
+                    self.pic_canvas.delete(cid)
+                    nid = self.pic_canvas.create_image(p["x"], p["y"], image=img,
+                                                       anchor="nw", tags="pic")
+                    self._canvas_items.pop(cid, None)
+                    self._canvas_items[nid] = p
                 except Exception:
                     pass
             elif not has_pillow:
-                lbl.config(text="⚠ need Pillow\n(pip install pillow)", fg=kc.RED)
+                try:
+                    self.pic_canvas.itemconfig(cid, text="⚠ need Pillow", fill=kc.RED)
+                except Exception:
+                    pass
         self.after(0, swap)
+
+    # ----- drag-to-move handlers for pictures on the canvas -----
+    def _canvas_press(self, e):
+        hit = self.pic_canvas.find_closest(e.x, e.y)
+        if hit and hit[0] in self._canvas_items:
+            cid = hit[0]
+            cx, cy = self.pic_canvas.coords(cid)[:2]
+            self._drag = {"id": cid, "dx": e.x - cx, "dy": e.y - cy}
+        else:
+            self._drag = {"id": None, "dx": 0, "dy": 0}
+
+    def _canvas_drag(self, e):
+        cid = self._drag["id"]
+        if cid is None:
+            return
+        nx, ny = e.x - self._drag["dx"], e.y - self._drag["dy"]
+        self.pic_canvas.coords(cid, max(0, nx), max(0, ny))
+
+    def _canvas_release(self, e):
+        cid = self._drag["id"]
+        if cid is None:
+            return
+        pic = self._canvas_items.get(cid)
+        if pic:
+            x, y = self.pic_canvas.coords(cid)[:2]
+            pic["x"], pic["y"] = int(x), int(y)   # save new position
+            self._maybe_sync()
+        self._drag = {"id": None, "dx": 0, "dy": 0}
 
     def _apply_visual(self, s):
         # reflect font/color/bg on the editor so it previews the slide
@@ -328,7 +372,8 @@ class KidSlides(tk.Tk):
                 except Exception:
                     return
                 self.slides[self.index]["pictures"].append(
-                    {"title": pic.get("title", ""), "url": pic.get("url", "")})
+                    {"title": pic.get("title", ""), "url": pic.get("url", ""),
+                     "x": 40, "y": 40})   # start position; kid can drag it
                 self._load_slide(); self._maybe_sync()
             self.after(0, done)
         threading.Thread(target=work, daemon=True).start()
@@ -530,12 +575,17 @@ class Present(tk.Toplevel):
         for m in s.get("math", []):
             tk.Label(self.canvas, text=m, bg=s["bg"], fg=s["color"],
                      font=(kc.FONT, max(s["font_size"] + 6, 28))).pack(pady=4)
-        # show ACTUAL pictures (fetched via the Pi, needs Pillow)
+        # show ACTUAL pictures at the positions the kid dragged them to.
+        # Editor canvas is ~pic_canvas width; scale x/y up to the full screen.
         self._present_refs = []
+        sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
         for p in s.get("pictures", []):
+            # editor canvas is roughly 600x180; map onto the screen area
+            px = int(p.get("x", 40) / 600.0 * (sw - 200)) + 60
+            py = int(p.get("y", 40) / 180.0 * (sh - 300)) + 150
             holder = tk.Label(self.canvas, text="🖼 " + p.get("title", ""), bg=s["bg"],
                               fg=s["color"], font=(kc.FONT, 14))
-            holder.pack(pady=6)
+            holder.place(x=max(0, px), y=max(0, py))
             threading.Thread(target=self._present_img, args=(p, holder, s["bg"]),
                              daemon=True).start()
 
