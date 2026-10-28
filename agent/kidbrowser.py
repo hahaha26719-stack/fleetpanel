@@ -184,18 +184,24 @@ class _Api:
         self.window = None
 
     def _reinject_soon(self):
-        """After a navigation, re-add the toolbar once the new page loads.
-        Runs on a worker thread with a couple of gentle attempts — NOT tied to
-        the webview load event (which caused CPU/freeze/crash)."""
+        """After a navigation, re-add the toolbar once the new page settles.
+        SINGLE-FLIGHT: only one injection runs at a time. evaluate_js can block
+        while a heavy page is still loading, and stacking several of them is
+        what intermittently stalled the app ("Not Responding"). One injection,
+        after a short wait, errors swallowed."""
         import threading, time
+        if getattr(self, "_injecting", False):
+            return
+        self._injecting = True
         def work():
-            for delay in (1.0, 2.0):
-                time.sleep(delay)
+            try:
+                time.sleep(1.5)            # let the page get past its heaviest load
                 try:
                     self.window.evaluate_js(TOOLBAR_JS)
-                    return
                 except Exception:
                     pass
+            finally:
+                self._injecting = False
         threading.Thread(target=work, daemon=True).start()
 
     def navigate(self, text):
