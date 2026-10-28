@@ -214,6 +214,12 @@ class KidSlides(tk.Tk):
             threading.Thread(target=self._load_thumb, args=(p, lbl), daemon=True).start()
 
     def _load_thumb(self, p, lbl):
+        # Check Pillow up front so we can explain if the image can't render.
+        try:
+            import PIL  # noqa
+            has_pillow = True
+        except Exception:
+            has_pillow = False
         img = kc.fetch_image(self.session, p.get("url", ""), max_w=160, max_h=120)
         def swap():
             if img is not None:
@@ -222,6 +228,8 @@ class KidSlides(tk.Tk):
                     lbl.config(image=img, text="")
                 except Exception:
                     pass
+            elif not has_pillow:
+                lbl.config(text="⚠ need Pillow\n(pip install pillow)", fg=kc.RED)
         self.after(0, swap)
 
     def _apply_visual(self, s):

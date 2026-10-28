@@ -22,8 +22,10 @@ for %%F in (agent kidcommon launcher kidnotepad kidppt kidbrowser) do (
     curl -L -s -o "%DEST%\%%F.py" "%RAW%/%%F.py"
 )
 
+echo Ensuring Python packages are installed (pywebview for Web, pillow for pictures) ...
+python -m pip install --quiet pywebview pillow 2>nul || echo [WARN] pip install failed - pictures need 'pip install pillow'.
+
 echo.
-echo Done. Latest files pulled. If an app is open, close and reopen it.
-echo (The browser engine/pillow are already installed by setup-agent.bat.)
+echo Done. Latest files + packages pulled. If an app is open, close and reopen it.
 pause
 endlocal
