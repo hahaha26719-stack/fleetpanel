@@ -55,6 +55,10 @@ class KidNotepad(tk.Tk):
                             fg=kc.INK, insertbackground=kc.INK, relief="flat",
                             padx=14, pady=12, undo=True)
         self.text.pack(expand=True, fill="both", padx=10, pady=10)
+        # right-click an embedded picture to resize / delete it
+        self.text.bind("<Button-3>", self._image_menu)
+        tk.Label(f, text="Tip: right-click a picture to make it bigger/smaller or delete it.",
+                 bg=kc.PANEL, fg=kc.MUT, font=(kc.FONT, 9)).pack(anchor="w", padx=12)
 
     # --------------------------------------------------------- 2. My Files
     def _build_files(self, nb):
@@ -164,24 +168,83 @@ class KidNotepad(tk.Tk):
         self.after(0, show)
 
     def _insert_picture(self, item):
-        # Insert the ACTUAL image into the note (needs Pillow). Falls back to a
-        # text reference if Pillow isn't installed or the fetch fails.
+        # Insert the ACTUAL image into the note (needs Pillow). Each image is
+        # tracked so it can be RESIZED or DELETED via right-click.
         self.nb.select(0)
         if not hasattr(self, "_img_refs"):
-            self._img_refs = []
+            self._img_refs = []          # keep PhotoImage refs alive
+            self._images = {}            # tk image-name -> {"url":.., "size":..}
         self.text.insert("end", f"\n[{item.get('title','picture')}]\n")
+        self._place_image(item.get("url", ""), 300)
 
+    def _place_image(self, url, size, at="end"):
         def work():
-            img = kc.fetch_image(self.session, item.get("url", ""), max_w=360, max_h=260)
+            img = kc.fetch_image(self.session, url, max_w=size, max_h=size)
             def place():
                 if img is not None:
-                    self._img_refs.append(img)   # keep a reference alive
-                    self.text.image_create("end", image=img)
-                    self.text.insert("end", "\n")
+                    self._img_refs.append(img)
+                    name = self.text.image_create(at, image=img)
+                    self._images[name] = {"url": url, "size": size}
+                    # right-click the image to resize / delete it
+                    self.text.tag_add("img_" + name, name)
+                    self.text.insert(self.text.index(name) + "+1c", "\n")
                 else:
-                    self.text.insert("end", f"(picture: {item.get('url','')})\n")
+                    self.text.insert(at, f"(picture: {url})\n")
             self.after(0, place)
         threading.Thread(target=work, daemon=True).start()
+
+    def _image_menu(self, event):
+        """Right-click on an embedded image -> resize / delete menu."""
+        idx = self.text.index(f"@{event.x},{event.y}")
+        # find an image at/near the click
+        name = None
+        for n in list(self._images.keys()):
+            try:
+                if self.text.index(n) == idx or self.text.index(n) == self.text.index(idx):
+                    name = n
+                    break
+            except Exception:
+                continue
+        # fallback: check the char right at the click
+        if not name:
+            try:
+                dumped = self.text.dump(idx, idx + "+1c", image=True)
+                for kind, val, _ in dumped:
+                    if kind == "image":
+                        name = val
+            except Exception:
+                pass
+        if not name or name not in self._images:
+            return
+        info = self._images[name]
+        m = tk.Menu(self, tearoff=0)
+        m.add_command(label="➕ Bigger",
+                      command=lambda: self._img_change(name, info, 1.3))
+        m.add_command(label="➖ Smaller",
+                      command=lambda: self._img_change(name, info, 0.75))
+        m.add_separator()
+        m.add_command(label="🗑 Delete", command=lambda: self._img_delete(name))
+        m.tk_popup(event.x_root, event.y_root)
+
+    def _img_change(self, name, info, factor):
+        try:
+            idx = self.text.index(name)
+        except Exception:
+            return
+        new_size = max(60, min(800, int(info["size"] * factor)))
+        url = info["url"]
+        # remove old image, insert a new one at the same spot at the new size
+        self.text.delete(idx)
+        self._images.pop(name, None)
+        self._place_image(url, new_size, at=idx)
+
+    def _img_delete(self, name):
+        try:
+            idx = self.text.index(name)
+            self.text.delete(idx)
+        except Exception:
+            pass
+        self._images.pop(name, None)
 
     # --------------------------------------------------------- 4. Together
     def _build_together(self, nb):

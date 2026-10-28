@@ -154,12 +154,25 @@ class KidSlides(tk.Tk):
         self.extras.pack(fill="x", pady=(4, 0))
 
         # DRAGGABLE picture area: pictures live on this canvas and can be moved
-        # around by dragging. Their x/y is saved per picture in the slide.
-        tk.Label(right, text="Pictures (drag to move):", bg=kc.PANEL, fg=kc.MUT,
-                 font=(kc.FONT, 10)).pack(anchor="w", pady=(6, 0))
-        self.pic_canvas = tk.Canvas(right, bg="white", height=180, highlightthickness=1,
+        # by dragging. Click a picture to select it, then use the buttons to
+        # resize it bigger/smaller or delete it. x/y + size saved per picture.
+        pichdr = tk.Frame(right, bg=kc.PANEL)
+        pichdr.pack(fill="x", pady=(6, 0))
+        tk.Label(pichdr, text="Pictures (click to select, drag to move):", bg=kc.PANEL,
+                 fg=kc.MUT, font=(kc.FONT, 10)).pack(side="left")
+        tk.Button(pichdr, text="🗑 Delete", bg=kc.RED, fg="white", relief="flat",
+                  cursor="hand2", font=(kc.FONT, 9, "bold"), padx=6,
+                  command=self._pic_delete).pack(side="right", padx=2)
+        tk.Button(pichdr, text="➖", bg=kc.PRIMARY, fg="white", relief="flat",
+                  cursor="hand2", font=(kc.FONT, 9, "bold"), padx=8,
+                  command=lambda: self._pic_resize(0.8)).pack(side="right", padx=2)
+        tk.Button(pichdr, text="➕", bg=kc.GREEN, fg="white", relief="flat",
+                  cursor="hand2", font=(kc.FONT, 9, "bold"), padx=8,
+                  command=lambda: self._pic_resize(1.25)).pack(side="right", padx=2)
+        self.pic_canvas = tk.Canvas(right, bg="white", height=200, highlightthickness=1,
                                     highlightbackground=kc.LINE if hasattr(kc, "LINE") else "#ddd")
         self.pic_canvas.pack(fill="x", pady=(2, 4))
+        self._selected_pic = None   # currently selected picture dict
         self._thumb_refs = []        # keep PhotoImage refs alive
         self._canvas_items = {}      # canvas_id -> picture dict
         self._drag = {"id": None, "dx": 0, "dy": 0}
@@ -226,7 +239,8 @@ class KidSlides(tk.Tk):
             has_pillow = True
         except Exception:
             has_pillow = False
-        img = kc.fetch_image(self.session, p.get("url", ""), max_w=140, max_h=110)
+        sz = int(p.get("size", 120))
+        img = kc.fetch_image(self.session, p.get("url", ""), max_w=sz, max_h=sz)
         def swap():
             if not self.pic_canvas.winfo_exists():
                 return
@@ -248,15 +262,29 @@ class KidSlides(tk.Tk):
                     pass
         self.after(0, swap)
 
-    # ----- drag-to-move handlers for pictures on the canvas -----
+    # ----- drag-to-move + select handlers for pictures on the canvas -----
     def _canvas_press(self, e):
         hit = self.pic_canvas.find_closest(e.x, e.y)
         if hit and hit[0] in self._canvas_items:
             cid = hit[0]
+            self._selected_pic = self._canvas_items[cid]   # select it
             cx, cy = self.pic_canvas.coords(cid)[:2]
             self._drag = {"id": cid, "dx": e.x - cx, "dy": e.y - cy}
+            self._highlight_selected(cid)
         else:
+            self._selected_pic = None
             self._drag = {"id": None, "dx": 0, "dy": 0}
+            self.pic_canvas.delete("selbox")
+
+    def _highlight_selected(self, cid):
+        self.pic_canvas.delete("selbox")
+        try:
+            b = self.pic_canvas.bbox(cid)
+            if b:
+                self.pic_canvas.create_rectangle(b[0]-2, b[1]-2, b[2]+2, b[3]+2,
+                                                 outline=kc.PRIMARY, width=2, tags="selbox")
+        except Exception:
+            pass
 
     def _canvas_drag(self, e):
         cid = self._drag["id"]
@@ -264,6 +292,7 @@ class KidSlides(tk.Tk):
             return
         nx, ny = e.x - self._drag["dx"], e.y - self._drag["dy"]
         self.pic_canvas.coords(cid, max(0, nx), max(0, ny))
+        self._highlight_selected(cid)
 
     def _canvas_release(self, e):
         cid = self._drag["id"]
@@ -275,6 +304,32 @@ class KidSlides(tk.Tk):
             pic["x"], pic["y"] = int(x), int(y)   # save new position
             self._maybe_sync()
         self._drag = {"id": None, "dx": 0, "dy": 0}
+
+    def _pic_resize(self, factor):
+        """Make the selected picture bigger (>1) or smaller (<1)."""
+        if not self._selected_pic:
+            messagebox.showinfo("Resize", "Click a picture first to select it.", parent=self)
+            return
+        cur = int(self._selected_pic.get("size", 120))
+        new = max(40, min(600, int(cur * factor)))
+        self._selected_pic["size"] = new
+        sel = self._selected_pic
+        self._load_slide()                 # re-render at the new size
+        self._selected_pic = sel           # keep selection
+        self._maybe_sync()
+
+    def _pic_delete(self):
+        """Delete the selected picture from the slide."""
+        if not self._selected_pic:
+            messagebox.showinfo("Delete", "Click a picture first to select it.", parent=self)
+            return
+        try:
+            self.slides[self.index]["pictures"].remove(self._selected_pic)
+        except ValueError:
+            pass
+        self._selected_pic = None
+        self._load_slide()
+        self._maybe_sync()
 
     def _apply_visual(self, s):
         # reflect font/color/bg on the editor so it previews the slide
@@ -373,7 +428,7 @@ class KidSlides(tk.Tk):
                     return
                 self.slides[self.index]["pictures"].append(
                     {"title": pic.get("title", ""), "url": pic.get("url", ""),
-                     "x": 40, "y": 40})   # start position; kid can drag it
+                     "x": 40, "y": 40, "size": 120})   # pos + size; kid can change
                 self._load_slide(); self._maybe_sync()
             self.after(0, done)
         threading.Thread(target=work, daemon=True).start()
@@ -590,7 +645,9 @@ class Present(tk.Toplevel):
                              daemon=True).start()
 
     def _present_img(self, p, holder, bg):
-        img = kc.fetch_image(self.parent_session, p.get("url", ""), max_w=640, max_h=420)
+        # scale the editor size up ~3.5x for the big screen
+        big = int(p.get("size", 120) * 3.5)
+        img = kc.fetch_image(self.parent_session, p.get("url", ""), max_w=big, max_h=big)
         def swap():
             if img is not None:
                 self._present_refs.append(img)
