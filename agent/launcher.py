@@ -335,30 +335,50 @@ class Fleet(tk.Tk):
             pass
 
     def _do_update(self):
-        import urllib.request
+        import urllib.request, os as _os, stat
         here = os.path.dirname(os.path.abspath(__file__))
         raw = "https://raw.githubusercontent.com/hahaha26719-stack/fleetpanel/main/agent"
         files = ["agent.py", "kidcommon.py", "launcher.py", "kidnotepad.py",
                  "kidppt.py", "kidbrowser.py"]
         ok = 0
+        errors = []
         for f in files:
+            dest = os.path.join(here, f)
             try:
                 req = urllib.request.Request(f"{raw}/{f}", headers={"User-Agent": "FleetPanel"})
                 with urllib.request.urlopen(req, timeout=20) as r:
                     data = r.read()
-                with open(os.path.join(here, f), "wb") as out:
+                if not data:
+                    errors.append(f"{f}: empty download")
+                    continue
+                # the folder may be read-only for this user — clear the flag first
+                try:
+                    if _os.path.exists(dest):
+                        _os.chmod(dest, stat.S_IWRITE)
+                except Exception:
+                    pass
+                with open(dest, "wb") as out:
                     out.write(data)
                 ok += 1
             except Exception as e:
-                print(f"[update] {f} failed: {e}")
+                errors.append(f"{f}: {e}")
         from tkinter import messagebox
         def done():
             self._set_update_status("")
             self._tick_clock()
-            messagebox.showinfo("Update",
-                                f"Updated {ok}/{len(files)} files.\n"
-                                "Sign out and back in to use the new version.",
-                                parent=self)
+            if ok == len(files):
+                messagebox.showinfo("Update",
+                                    f"Updated all {ok} files! 🎉\n"
+                                    "Sign out and back in to use the new version.",
+                                    parent=self)
+            else:
+                detail = "\n".join(errors[:4])
+                messagebox.showerror("Update",
+                                     f"Only updated {ok}/{len(files)} files.\n\n"
+                                     f"{detail}\n\n"
+                                     "If it says 'Permission denied', C:\\FleetAgent is "
+                                     "locked. Run update-agent.bat as Administrator instead.",
+                                     parent=self)
         self.after(0, done)
 
     def _tick_clock(self):
