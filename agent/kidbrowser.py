@@ -295,17 +295,24 @@ def run_browser(session):
     except Exception:
         pass
 
-    # ---- WebView2 performance flags for WEAK hardware ----
-    # Block autoplaying video/audio (a huge CPU hog), cut background work, and
-    # ease rendering load. These are Chromium flags passed to the engine.
+    # ---- WebView2 flags tuned for FAST startup + fast page opens ----
+    #  * skip first-run/setup work and default-browser checks at launch
+    #  * no autoplay (also saves CPU) and no translate popups
+    #  * KEEP back/forward cache ON so going back/forward is instant
+    #  * prefetch/preconnect so pages start fetching sooner
+    #  * trim background work so the little CPU goes to the page you're viewing
     os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = (
-        "--autoplay-policy=user-gesture-required "   # no autoplay video = big CPU save
+        "--no-first-run "
+        "--no-default-browser-check "
+        "--disable-sync "
+        "--disable-features=Translate,msSmartScreenProtection,EdgeCollections,"
+        "EdgeShoppingAssistant,msWebOOUI "
+        "--autoplay-policy=user-gesture-required "
         "--disable-background-timer-throttling "
-        "--disable-features=Translate,BackForwardCache "
-        "--disable-renderer-backgrounding "
-        "--disable-smooth-scrolling "
         "--disable-background-networking "
-        "--blink-settings=imagesEnabled=true"
+        "--disable-renderer-backgrounding "
+        "--dns-prefetch-disable=false "
+        "--enable-features=NetworkServiceInProcess "
     )
 
     windowed = "--windowed" in sys.argv
