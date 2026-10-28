@@ -219,35 +219,46 @@ class KidSlides(tk.Tk):
         """Draw each picture on the drag canvas at its stored x/y. Pictures can
         be dragged to reposition; the new x/y is saved to the slide."""
         self.pic_canvas.delete("all")
-        self._thumb_refs = []
         self._canvas_items = {}
+        # Bump a generation id so stale background loads from a PREVIOUS render
+        # (e.g. before a resize/select re-render) are ignored — that race was
+        # making images never appear in the editor.
+        self._gen = getattr(self, "_gen", 0) + 1
+        gen = self._gen
+        # Keep a PERSISTENT ref cache so images already fetched aren't GC'd when
+        # we re-render; only grows, which is fine for a handful of pictures.
+        if not hasattr(self, "_thumb_cache"):
+            self._thumb_cache = {}   # (url,size) -> PhotoImage
         if not s["pictures"]:
             self.pic_canvas.create_text(90, 20, text="(no pictures — use 🖼 Picture)",
                                         fill=kc.MUT, font=(kc.FONT, 9), anchor="w")
             return
         for p in s["pictures"]:
             p.setdefault("x", 40); p.setdefault("y", 40)
-            # placeholder text until the image loads
             cid = self.pic_canvas.create_text(p["x"], p["y"], text="🖼 " + p.get("title", "pic")[:14],
                                               fill=kc.MUT, font=(kc.FONT, 9), anchor="nw", tags="pic")
             self._canvas_items[cid] = p
-            threading.Thread(target=self._load_thumb, args=(p, cid), daemon=True).start()
+            threading.Thread(target=self._load_thumb, args=(p, cid, gen), daemon=True).start()
 
-    def _load_thumb(self, p, cid):
+    def _load_thumb(self, p, cid, gen):
         try:
             import PIL  # noqa
             has_pillow = True
         except Exception:
             has_pillow = False
         sz = int(p.get("size", 120))
-        img = kc.fetch_image(self.session, p.get("url", ""), max_w=sz, max_h=sz)
+        key = (p.get("url", ""), sz)
+        img = self._thumb_cache.get(key)
+        if img is None:
+            img = kc.fetch_image(self.session, p.get("url", ""), max_w=sz, max_h=sz)
+
         def swap():
-            if not self.pic_canvas.winfo_exists():
+            # ignore if this is from an old render, or the canvas is gone
+            if gen != getattr(self, "_gen", gen) or not self.pic_canvas.winfo_exists():
                 return
             if img is not None:
-                self._thumb_refs.append(img)
+                self._thumb_cache[key] = img          # persistent ref (not GC'd)
                 try:
-                    # replace the placeholder text with the real image at x/y
                     self.pic_canvas.delete(cid)
                     nid = self.pic_canvas.create_image(p["x"], p["y"], image=img,
                                                        anchor="nw", tags="pic")
