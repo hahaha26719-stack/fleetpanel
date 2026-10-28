@@ -324,28 +324,31 @@ def run_browser(session):
                                    width=1100, height=760, maximized=not windowed)
     api.window = window
 
-    # After EVERY page finishes loading: enforce policy on where we landed
-    # (covers link clicks / redirects) and inject the floating toolbar.
-    # THROTTLED: some sites (SPAs) fire 'loaded' rapidly; without a guard that
-    # pegs the CPU re-checking the URL and re-injecting JS. We run at most once
-    # per URL and no more often than every 1.5s.
-    # NOTE: we deliberately do NOT hook the webview 'loaded' event. Repeatedly
-    # calling get_current_url()/evaluate_js() from that event caused high CPU,
-    # freezes, and crashes on modern SPA sites. Instead:
-    #   * the toolbar is injected ONCE, shortly after startup, and it RE-INJECTS
-    #     itself on its own pages via a lightweight in-page check;
-    #   * policy is enforced at NAVIGATION time (api.navigate), where the kid
-    #     actually goes somewhere, which is where it matters.
+    # Re-add the toolbar after EVERY page load — including when the kid clicks a
+    # normal link ON a website (that navigates WITHOUT going through our own
+    # toolbar, so the bar would otherwise be missing on the new page). The
+    # handler is CHEAP: it just triggers api._reinject_soon(), which is
+    # single-flight + offloads to a worker thread, so it can't stall the app
+    # (the old freezes came from doing blocking work INSIDE the event, not from
+    # the event itself).
+    def _on_loaded(w=None):
+        try:
+            api._reinject_soon()
+        except Exception:
+            pass
+    try:
+        window.events.loaded += _on_loaded
+    except Exception:
+        pass
+
     import threading as _th, time as _time
 
     def _inject_once():
-        _time.sleep(1.2)                 # let the first page settle
-        for _ in range(3):               # a few gentle attempts, then stop
-            try:
-                window.evaluate_js(TOOLBAR_JS)
-                break
-            except Exception:
-                _time.sleep(1.0)
+        _time.sleep(1.2)                 # first injection after startup
+        try:
+            api._reinject_soon()
+        except Exception:
+            pass
     _th.Thread(target=_inject_once, daemon=True).start()
 
     # Home is already the (instant, local) start page — no delayed navigation
