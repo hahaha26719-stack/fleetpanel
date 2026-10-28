@@ -404,34 +404,14 @@ class KidSlides(tk.Tk):
         q = simpledialog.askstring("Add picture", "Search for a picture:", parent=self)
         if not q:
             return
-        import urllib.parse
-        self.extras.config(text="Searching for pictures… 🔎")
-        def work():
-            status, data = kc.api(self.session, "GET",
-                                  f"/api/pictures/{self.session['username']}?q="
-                                  + urllib.parse.quote(q))
-            def done():
-                if status != 200 or not isinstance(data, dict) or not data.get("results"):
-                    msg = data.get("message", "No pictures found.") if isinstance(data, dict) else "Search failed."
-                    self.extras.config(text=msg); return
-                # let the kid pick one from the first few titles
-                results = data["results"]
-                choice = simpledialog.askstring(
-                    "Pick a picture",
-                    "Type the number:\n" + "\n".join(
-                        f"{i+1}. {r.get('title','picture')[:40]}" for i, r in enumerate(results)),
-                    parent=self)
-                try:
-                    idx = int(choice) - 1
-                    pic = results[idx]
-                except Exception:
-                    return
-                self.slides[self.index]["pictures"].append(
-                    {"title": pic.get("title", ""), "url": pic.get("url", ""),
-                     "x": 40, "y": 40, "size": 120})   # pos + size; kid can change
-                self._load_slide(); self._maybe_sync()
-            self.after(0, done)
-        threading.Thread(target=work, daemon=True).start()
+        PicturePicker(self, self.session, q, self._add_picture_from_result)
+
+    def _add_picture_from_result(self, pic):
+        """Called when the kid clicks a thumbnail in the picker."""
+        self.slides[self.index]["pictures"].append(
+            {"title": pic.get("title", ""), "url": pic.get("url", ""),
+             "x": 40, "y": 40, "size": 120})
+        self._load_slide(); self._maybe_sync()
 
     # ---------------------------------------------------------------- math
     def add_math(self):
@@ -549,6 +529,67 @@ class KidSlides(tk.Tk):
             except Exception:
                 pass
         super().destroy()
+
+
+# ------------------------------------------------------------ picture picker
+class PicturePicker(tk.Toplevel):
+    """Searches pictures via the Pi and shows CLICKABLE thumbnails. Click one to
+    add it to the slide."""
+    def __init__(self, parent, session, query, on_pick):
+        super().__init__(parent)
+        self.session = session
+        self.on_pick = on_pick
+        self.title(f"Pictures: {query}")
+        self.configure(bg=kc.PANEL)
+        self.geometry("680x520")
+        self._refs = []
+        self.status = tk.Label(self, text="Searching… 🔎", bg=kc.PANEL, fg=kc.MUT,
+                               font=(kc.FONT, 13))
+        self.status.pack(pady=10)
+        self.grid_area = tk.Frame(self, bg=kc.PANEL)
+        self.grid_area.pack(expand=True, fill="both", padx=10, pady=6)
+        import threading, urllib.parse
+        def work():
+            status, data = kc.api(session, "GET",
+                                  f"/api/pictures/{session['username']}?q="
+                                  + urllib.parse.quote(query))
+            self.after(0, lambda: self._show(status, data))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _show(self, status, data):
+        if status != 200 or not isinstance(data, dict) or not data.get("results"):
+            msg = data.get("message", "No pictures found.") if isinstance(data, dict) else "Search failed."
+            self.status.config(text=msg)
+            return
+        results = data["results"]
+        self.status.config(text="Click a picture to add it:")
+        for i, r in enumerate(results):
+            cell = tk.Frame(self.grid_area, bg="white", cursor="hand2",
+                            highlightbackground=kc.LINE if hasattr(kc, "LINE") else "#ddd",
+                            highlightthickness=1)
+            cell.grid(row=i // 4, column=i % 4, padx=6, pady=6)
+            lbl = tk.Label(cell, text="🖼\n" + r.get("title", "pic")[:16],
+                           bg="white", fg=kc.MUT, font=(kc.FONT, 9), width=18, height=6)
+            lbl.pack()
+            for w in (cell, lbl):
+                w.bind("<Button-1>", lambda e, res=r: self._pick(res))
+            import threading
+            threading.Thread(target=self._thumb, args=(r, lbl), daemon=True).start()
+
+    def _thumb(self, r, lbl):
+        img = kc.fetch_image(self.session, r.get("url", ""), max_w=140, max_h=110)
+        def swap():
+            if img is not None and lbl.winfo_exists():
+                self._refs.append(img)
+                try:
+                    lbl.config(image=img, text="", width=140, height=110)
+                except Exception:
+                    pass
+        self.after(0, swap)
+
+    def _pick(self, result):
+        self.on_pick(result)
+        self.destroy()
 
 
 # -------------------------------------------------------------- math dialog
