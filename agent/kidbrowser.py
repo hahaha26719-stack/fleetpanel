@@ -184,22 +184,25 @@ class _Api:
         self.window = None
 
     def _reinject_soon(self):
-        """After a navigation, re-add the toolbar once the new page settles.
-        SINGLE-FLIGHT: only one injection runs at a time. evaluate_js can block
-        while a heavy page is still loading, and stacking several of them is
-        what intermittently stalled the app ("Not Responding"). One injection,
-        after a short wait, errors swallowed."""
+        """After a navigation, add the toolbar once the new page is ready.
+        SINGLE-FLIGHT (only one runs at a time, so evaluate_js calls can't stack
+        and stall the app), but with a few spaced attempts because real websites
+        aren't ready at a fixed moment — the toolbar JS itself is idempotent
+        (returns early if the bar already exists), so re-tries are harmless."""
         import threading, time
         if getattr(self, "_injecting", False):
             return
         self._injecting = True
         def work():
             try:
-                time.sleep(1.5)            # let the page get past its heaviest load
-                try:
-                    self.window.evaluate_js(TOOLBAR_JS)
-                except Exception:
-                    pass
+                # spaced attempts so the bar appears on fast AND slow pages,
+                # without piling up (we're the only injector running).
+                for delay in (0.6, 1.5, 3.0):
+                    time.sleep(delay)
+                    try:
+                        self.window.evaluate_js(TOOLBAR_JS)
+                    except Exception:
+                        pass
             finally:
                 self._injecting = False
         threading.Thread(target=work, daemon=True).start()
