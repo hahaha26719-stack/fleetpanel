@@ -45,6 +45,8 @@ APPS = [
     ("notepad",    "Notepad", "📝", "#3ecf8e", "kidnotepad.py"),
     ("powerpoint", "Slides",  "📊", "#ff6b9d", "kidppt.py"),
     ("edge",       "Web",     "🌐", "#5b8cff", "kidbrowser.py"),
+    ("nys_testing", "NYS Testing", "📚", "#8b6cff",
+     r"C:\Program Files (x86)\NWEA\NWEA Secure Testing Browser\NWEA Secure Testing Browser.exe"),
 ]
 
 
@@ -491,9 +493,14 @@ class Fleet(tk.Tk):
             if o.get("script") == script:
                 self._raise_app(o)
                 return
-        args = [self._launcher_exe(), os.path.join(here, script)]
-        if WINDOWED:
-            args.append("--windowed")
+        # Python-based FleetPanel apps run through the bundled/current Python
+        # interpreter; external Windows applications launch directly.
+        if script.lower().endswith(".exe"):
+            args = [script]
+        else:
+            args = [self._launcher_exe(), os.path.join(here, script)]
+            if WINDOWED:
+                args.append("--windowed")
         try:
             proc = subprocess.Popen(args, cwd=here)
         except Exception as e:
