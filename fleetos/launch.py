@@ -18,6 +18,11 @@ AGENT_DIR = ROOT / "agent"
 if not (AGENT_DIR / "launcher.py").is_file():
     raise SystemExit(f"FleetPanel agent directory not found: {AGENT_DIR}")
 
+# Make both the OS integration package and the original top-level agent
+# modules importable regardless of the current working directory.
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(AGENT_DIR))
+
 # Give the unchanged Windows-era apps a Linux writable state location.
 state_root = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state"))
 fleet_state = state_root / "fleetpanel"
@@ -25,8 +30,6 @@ fleet_state.mkdir(parents=True, exist_ok=True)
 os.environ.setdefault("LOCALAPPDATA", str(fleet_state))
 os.environ.setdefault("FLEETPANEL_OS", "1")
 
-# The original apps import each other as top-level modules from agent/.
-sys.path.insert(0, str(AGENT_DIR))
 os.chdir(AGENT_DIR)
 
 import agent  # noqa: E402
