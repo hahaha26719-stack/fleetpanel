@@ -11,7 +11,7 @@ sudo apt-get install live-build debootstrap squashfs-tools xorriso git
 ./build/debian/build-live-image.sh
 ```
 
-The script creates a disposable live-build workspace under `out/` and produces an ISO there. The first ISO is a diagnostic/live test image; it does not install to internal eMMC.
+The script creates a disposable live-build workspace under `out/` and produces an ISO there. The first ISO is a diagnostic/live test image; it does not install to internal eMMC. Select the FleetPanel session at the display-manager login screen; do not enable automatic login on shared school hardware until kiosk security is reviewed.
 
 ## Included system
 
