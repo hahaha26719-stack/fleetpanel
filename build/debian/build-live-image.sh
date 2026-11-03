@@ -27,6 +27,15 @@ cp "$ROOT/build/debian/packages.list" config/package-lists/fleetpanel.list.chroo
 printf '\nrsync\nlive-boot\nlibinput-tools\npciutils\nusbutils\niw\nrfkill\n' >> config/package-lists/fleetpanel.list.chroot
 mkdir -p config/includes.chroot/opt/fleetpanel
 rsync -a --delete --exclude='.git' "$ROOT/" config/includes.chroot/opt/fleetpanel/
+chmod 0755 config/includes.chroot/opt/fleetpanel/fleetos/session.sh
+mkdir -p config/hooks/normal
+cat > config/hooks/normal/010-fleetpanel.hook.chroot <<'HOOK'
+#!/bin/sh
+set -eu
+python3 -m venv --system-site-packages /opt/fleetpanel/.venv
+/opt/fleetpanel/.venv/bin/pip install --no-cache-dir -r /opt/fleetpanel/fleetos/requirements-linux.txt
+HOOK
+chmod 0755 config/hooks/normal/010-fleetpanel.hook.chroot
 mkdir -p config/includes.chroot/usr/share/xsessions
 cp "$ROOT/build/debian/fleetpanel.desktop" config/includes.chroot/usr/share/xsessions/fleetpanel.desktop
 lb build
