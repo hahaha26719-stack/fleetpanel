@@ -11,7 +11,7 @@ WorkingDirectory=/opt/fleetpanel
 Environment=FLEETPANEL_OS=1
 Environment=PYTHONUNBUFFERED=1
 ExecStart=/opt/fleetpanel/.venv/bin/python /opt/fleetpanel/fleetos/launch.py
-Restart=on-failure
+Restart=always
 RestartSec=3
 NoNewPrivileges=true
 PrivateTmp=true
