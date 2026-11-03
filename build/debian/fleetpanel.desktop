@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=FleetPanel
+Comment=FleetPanel student environment
+Exec=/opt/fleetpanel/fleetos/session.sh
+Type=Application
+DesktopNames=FleetPanel
