@@ -16,12 +16,13 @@ chmod -R a+rX "$TARGET"
 python3 -m venv --system-site-packages "$TARGET/.venv"
 "$TARGET/.venv/bin/pip" install --upgrade pip
 "$TARGET/.venv/bin/pip" install -r "$TARGET/fleetos/requirements-linux.txt"
-install -m 0644 "$TARGET/system/fleetpanel-kiosk.service" /etc/systemd/system/fleetpanel-kiosk.service
-systemctl daemon-reload
-systemctl enable fleetpanel-kiosk.service
+install -m 0644 "$TARGET/build/debian/fleetpanel.desktop" /usr/share/xsessions/fleetpanel.desktop
+install -m 0755 "$TARGET/fleetos/session.sh" "$TARGET/fleetos/session.sh"
 cat <<'NOTICE'
 FleetPanel OS test components installed.
-This is NOT a bootable image or a disk installer. It does not configure automatic
+This is NOT a bootable image or a disk installer. Log in to the test desktop and
+select the FleetPanel session after setting a password for the fleetpanel account.
+It does not configure automatic
 graphical login, partition storage, flash firmware or enforce kiosk restrictions.
 The Linux policy bridge intentionally rejects unsupported Windows policies.
 NOTICE
