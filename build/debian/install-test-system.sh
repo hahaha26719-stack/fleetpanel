@@ -17,7 +17,7 @@ python3 -m venv --system-site-packages "$TARGET/.venv"
 "$TARGET/.venv/bin/pip" install --upgrade pip
 "$TARGET/.venv/bin/pip" install -r "$TARGET/fleetos/requirements-linux.txt"
 install -m 0644 "$TARGET/build/debian/fleetpanel.desktop" /usr/share/xsessions/fleetpanel.desktop
-install -m 0755 "$TARGET/fleetos/session.sh" "$TARGET/fleetos/session.sh"
+chmod 0755 "$TARGET/fleetos/session.sh"
 cat <<'NOTICE'
 FleetPanel OS test components installed.
 This is NOT a bootable image or a disk installer. Log in to the test desktop and
