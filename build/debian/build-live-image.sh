@@ -26,8 +26,8 @@ cp "$ROOT/build/debian/packages.list" config/package-lists/fleetpanel.list.chroo
 printf '\nrsync\nlive-boot\nlibinput-tools\npciutils\nusbutils\niw\nrfkill\n' >> config/package-lists/fleetpanel.list.chroot
 mkdir -p config/includes.chroot/opt/fleetpanel
 rsync -a --delete --exclude='.git' "$ROOT/" config/includes.chroot/opt/fleetpanel/
-mkdir -p config/includes.chroot/etc/systemd/system
-cp "$ROOT/system/fleetpanel-kiosk.service" config/includes.chroot/etc/systemd/system/
+mkdir -p config/includes.chroot/usr/share/xsessions
+cp "$ROOT/build/debian/fleetpanel.desktop" config/includes.chroot/usr/share/xsessions/fleetpanel.desktop
 lb build
 mkdir -p "$OUT"
 cp ./*.iso "$OUT/fleetpanel-os-bobba-amd64.iso"
