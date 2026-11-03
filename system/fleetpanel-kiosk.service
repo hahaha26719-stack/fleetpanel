@@ -1,0 +1,24 @@
+[Unit]
+Description=FleetPanel student shell
+After=graphical.target NetworkManager.service
+Wants=NetworkManager.service
+PartOf=graphical.target
+[Service]
+Type=simple
+User=fleetpanel
+Group=fleetpanel
+WorkingDirectory=/opt/fleetpanel
+Environment=FLEETPANEL_OS=1
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/fleetpanel/.venv/bin/python /opt/fleetpanel/fleetos/launch.py
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/fleetpanel /home/fleetpanel
+RestrictSUIDSGID=true
+LockPersonality=true
+[Install]
+WantedBy=graphical.target
