@@ -1,55 +1,32 @@
-"""Explicit Linux boundary for the unchanged FleetPanel Windows agent.
+"""Linux boundary for the unchanged Windows-era FleetPanel agent.
 
-This first version intentionally refuses to pretend that Windows registry,
-Windows command templates, or Image File Execution Options are enforced on
-Linux. Linux policy enforcement must be implemented per policy type and tested
-before the OS is used with student accounts.
+Windows registry, IFEO, command-template and device-wide web policies are
+rejected rather than falsely reported as enforced. A privileged, tested Linux
+policy service is required before student deployment.
 """
 from __future__ import annotations
-
 import logging
-import os
-import subprocess
-
 log = logging.getLogger("fleetos.agent_bridge")
-
-
-def _unsupported(kind: str, detail: str) -> None:
-    # Loud, administrator-visible warning. Never silently claim enforcement.
-    log.error("UNSUPPORTED LINUX POLICY (%s): %s", kind, detail)
-
-
+def _unsupported(kind: str, detail: str = "") -> None:
+    message = f"{kind} policy is not implemented on FleetOS"
+    if detail: message += f": {detail}"
+    log.error(message)
+    raise NotImplementedError(message)
 def install(agent_module) -> None:
-    """Patch only platform integration functions in memory; source files stay intact."""
-
     def apply_registry(spec, value):
-        _unsupported("registry", f"{spec.get('hive')}\\{spec.get('path')}\\{spec.get('name')}")
-
+        _unsupported("Windows registry", f"{spec.get('hive')}\\{spec.get('path')}")
     def apply_command(spec, value):
-        _unsupported("command", "Windows command-template policies have no Linux equivalent yet")
-
+        _unsupported("Windows command template")
     def apply_app_block(value):
-        _unsupported("app_block", "Windows Image File Execution Options is not available on Linux")
-
+        _unsupported("Windows executable block list")
     def apply_web_block(value):
-        # The FleetPanel browser checks web_mode before each navigation. This
-        # does not block other browsers or system processes, so do not describe
-        # it as device-wide web filtering.
-        if value:
-            _unsupported("web_block", "browser-level filtering is not device-wide Linux enforcement")
-
+        _unsupported("device-wide web filtering")
     def launch_desktop():
-        # The student session is the shell. No Explorer replacement exists.
-        log.info("FleetPanel OS shell remains active; no Windows desktop to launch")
-
+        log.info("FleetOS has no separate Windows desktop to launch")
     def close_desktop():
-        log.info("No separate Windows desktop session exists on FleetPanel OS")
-
+        log.info("FleetOS has no separate Windows desktop to close")
     def reboot():
-        # A normal student session should not receive unrestricted reboot power.
-        # A privileged system service will be added for authenticated sign-out.
-        _unsupported("reboot", "privileged reboot broker has not been implemented")
-
+        _unsupported("privileged reboot broker")
     agent_module.apply_registry = apply_registry
     agent_module.apply_command = apply_command
     agent_module.apply_app_block = apply_app_block
