@@ -1,19 +1,32 @@
 # Debian image build
 
-The initial image target is a minimal Debian-based x86_64 UEFI system for BOBBA. Debian is the selected starting point for this branch, subject to kernel/audio validation.
+The first target is a minimal Debian 13 (trixie) amd64 live image for BOBBA. It is a development image, not a school deployment image.
 
-The image must include:
+## Build host
 
-- UEFI boot support and a maintained kernel;
-- Xorg or another tested display server plus a minimal session manager;
-- Python 3, Tkinter and Pillow for the existing FleetPanel apps;
-- WebKitGTK and a Linux pywebview backend for the existing browser;
-- NetworkManager and Intel wireless firmware;
-- Intel graphics userspace and Chromebook-specific audio configuration;
-- FleetOS integration and the unchanged `agent/` tree.
+Use a Debian 13 amd64 build host or a matching container with `live-build`, `debootstrap`, `squashfs-tools`, `xorriso` and `git`. Run:
 
-Do not pin an old kernel just because the base distribution supplies it. The BOBBA touchpad, wireless, display and Chromebook audio must be tested against the selected kernel before an image is considered ready.
+```sh
+sudo apt-get install live-build debootstrap squashfs-tools xorriso git
+./build/debian/build-live-image.sh
+```
 
-## Build state
+The script creates a disposable live-build workspace under `out/` and produces an ISO there. The first ISO is a diagnostic/live test image; it does not install to internal eMMC.
 
-This folder is a build specification only. A reproducible live-build configuration, installer, EFI image and CI build are not yet implemented. The first build should be a disposable test image, not an installer intended for the 100 school devices.
+## Included system
+
+- Debian kernel and UEFI GRUB boot path;
+- Xorg/Openbox diagnostic session;
+- Python/Tkinter/Pillow and WebKitGTK dependencies;
+- NetworkManager and Intel wireless firmware package;
+- Bluetooth and PipeWire/ALSA tools;
+- FleetPanel source tree and Linux integration.
+
+## Important limitations
+
+- The current agent contains Windows-only policy hooks. The Linux bridge rejects them instead of pretending they work.
+- A kiosk login service is included as an integration unit, but automatic graphical login and security hardening are not enabled by the image builder yet.
+- The browser must be tested against the actual installed pywebview/WebKitGTK versions.
+- The NYS tile still names a Windows NWEA executable. It is not a working Linux testing client.
+- Touchpad, Wi-Fi, graphics and audio need hands-on validation on a BOBBA Chromebook.
+- Do not install this image on school devices until NWEA secure testing has an approved solution.
