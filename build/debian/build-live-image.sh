@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+OUT="$ROOT/out"
+WORK="$OUT/live-build"
+mkdir -p "$OUT"
+for cmd in lb debootstrap mksquashfs xorriso; do
+  command -v "$cmd" >/dev/null || { echo "Missing build tool: $cmd" >&2; exit 1; }
+done
+rm -rf "$WORK"
+mkdir -p "$WORK"
+cd "$WORK"
+lb config \
+  --distribution trixie \
+  --architectures amd64 \
+  --binary-images iso-hybrid \
+  --bootloaders grub-efi,syslinux \
+  --debian-installer false \
+  --archive-areas "main contrib non-free-firmware" \
+  --apt-recommends false \
+  --iso-application "FleetPanel OS" \
+  --iso-volume "FLEETPANEL_OS"
+mkdir -p config/package-lists
+cp "$ROOT/build/debian/packages.list" config/package-lists/fleetpanel.list.chroot
+# Include tools needed for diagnostics and image setup.
+printf '\nrsync\nlive-boot\nlibinput-tools\npciutils\nusbutils\niw\nrfkill\n' >> config/package-lists/fleetpanel.list.chroot
+mkdir -p config/includes.chroot/opt/fleetpanel
+rsync -a --delete --exclude='.git' "$ROOT/" config/includes.chroot/opt/fleetpanel/
+mkdir -p config/includes.chroot/etc/systemd/system
+cp "$ROOT/system/fleetpanel-kiosk.service" config/includes.chroot/etc/systemd/system/
+lb build
+mkdir -p "$OUT"
+cp ./*.iso "$OUT/fleetpanel-os-bobba-amd64.iso"
+echo "Created $OUT/fleetpanel-os-bobba-amd64.iso"
