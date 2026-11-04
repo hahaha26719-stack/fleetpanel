@@ -184,30 +184,28 @@ class _Api:
         self.window = None
 
     def _reinject_soon(self):
-        """After a navigation: (1) RE-CHECK the final URL against policy — this
-        catches server-side REDIRECTS (e.g. gmail.com -> accounts.google.com),
-        which the navigation-time check alone misses; and (2) add the toolbar.
-        SINGLE-FLIGHT so evaluate_js calls can't stack and stall the app; a few
-        spaced attempts because pages aren't ready at a fixed moment."""
+        """After a navigation: re-check the final URL against policy (catches
+        server-side redirects), then draw the toolbar. Single-flight, and it
+        stops early once the toolbar is in place, so it does almost no work."""
         import threading, time
         if getattr(self, "_injecting", False):
             return
         self._injecting = True
         def work():
             try:
-                for delay in (0.6, 1.5, 3.0):
+                for delay in (0.8, 2.0):
                     time.sleep(delay)
-                    # (1) where did we actually end up? block redirects too.
                     try:
                         cur = self.window.get_current_url() or ""
                     except Exception:
                         cur = ""
                     if cur.startswith("http") and not url_allowed(self.web_mode, cur):
                         self._show_blocked(cur)
-                        return   # stop; we've shown the blocked page
-                    # (2) draw the toolbar (idempotent, safe to retry)
+                        return
                     try:
+                        # TOOLBAR_JS is idempotent; returns quickly if present
                         self.window.evaluate_js(TOOLBAR_JS)
+                        return          # success: no need for more passes
                     except Exception:
                         pass
             finally:
@@ -301,18 +299,26 @@ def run_browser(session):
     #  * KEEP back/forward cache ON so going back/forward is instant
     #  * prefetch/preconnect so pages start fetching sooner
     #  * trim background work so the little CPU goes to the page you're viewing
+    # Low-end PC tuning (Celeron N4000 / 4 GB): fewer renderer processes, no
+    # background network/timer work, and no extra visual features. Chromium's
+    # default multi-process model is the main CPU/RAM cost on weak hardware.
     os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = (
         "--no-first-run "
         "--no-default-browser-check "
         "--disable-sync "
         "--disable-features=Translate,msSmartScreenProtection,EdgeCollections,"
-        "EdgeShoppingAssistant,msWebOOUI "
+        "EdgeShoppingAssistant,msWebOOUI,MediaRouter,OptimizationHints,"
+        "CalculateNativeWinOcclusion,BackForwardCache "
         "--autoplay-policy=user-gesture-required "
-        "--disable-background-timer-throttling "
         "--disable-background-networking "
+        "--disable-breakpad "
+        "--disable-component-update "
+        "--disable-domain-reliability "
+        "--disable-client-side-phishing-detection "
         "--disable-renderer-backgrounding "
-        "--dns-prefetch-disable=false "
-        "--enable-features=NetworkServiceInProcess "
+        "--process-per-site "
+        "--renderer-process-limit=2 "
+        "--js-flags=--max-old-space-size=256 "
     )
 
     windowed = "--windowed" in sys.argv
@@ -343,13 +349,7 @@ def run_browser(session):
 
     import threading as _th, time as _time
 
-    def _inject_once():
-        _time.sleep(1.2)                 # first injection after startup
-        try:
-            api._reinject_soon()
-        except Exception:
-            pass
-    _th.Thread(target=_inject_once, daemon=True).start()
+    # (the 'loaded' event above covers the first page; no extra timer needed)
 
     # Home is already the (instant, local) start page — no delayed navigation
     # needed, so the browser is usable the moment the window appears.
