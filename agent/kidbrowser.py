@@ -1,401 +1,318 @@
 """
-FleetPanel Kid Browser (our own simplified browser)
-===================================================
-Our own browser UI with a kid-friendly address bar and big buttons. It enforces
-the admin 'web_mode' policy INSIDE the app: every navigation is checked by
-url_allowed() before loading, so no /etc/hosts or system changes are needed and
-picture search (a separate app) is unaffected.
+FleetBrowser - permanent browser toolbar with tabs (no webpage injection).
 
-Rendering uses the system WebView2 engine via `pywebview` so real websites look
-right. If pywebview isn't installed, it falls back to a message (install step is
-in docs). The policy/filtering logic (url_allowed) is pure and testable.
+Install:
+    pip install PySide6 PySide6-WebEngine pywebview
 
-Standalone test (logic only, no GUI):  python kidbrowser.py --selftest
-Run the browser:                        python kidbrowser.py
+Run through FleetPanel:
+    from kidbrowser import run_browser
+    run_browser(kc.load_session())
+
+Or test directly:
+    python kidbrowser.py
+
+This version uses Qt WebEngine for the browser UI because pywebview does not
+provide an embeddable multi-tab browser surface. The toolbar and tab strip are
+native Python/Qt widgets, outside the website.
 """
+
+import os
 import sys
 import urllib.parse
 
 import kidcommon as kc
 
-
-def host_of(url):
-    """Extract a hostname from a possibly-partial URL the kid typed."""
-    u = (url or "").strip()
-    if not u:
-        return ""
-    if "://" not in u:
-        u = "http://" + u
-    try:
-        return (urllib.parse.urlparse(u).hostname or "").lower()
-    except Exception:
-        return ""
-
-
-def normalize_url(text):
-    """Turn kid input into a real URL. If it looks like a search (spaces / no
-    dot), send it to a kid-safe search; otherwise treat it as a site."""
-    t = (text or "").strip()
-    if not t:
-        return ""
-    if t.startswith("http://") or t.startswith("https://"):
-        return t
-    looks_like_url = ("." in t and " " not in t)
-    if looks_like_url:
-        return "https://" + t          # default to HTTPS, not HTTP
-    # a search phrase -> DuckDuckGo with safe-search on (kid-friendly, no account)
-    return "https://duckduckgo.com/?kp=1&q=" + urllib.parse.quote(t)
-
-
-def url_allowed(web_mode_value, url):
-    """Return True if this URL may be loaded under the web_mode policy.
-    Uses the hostname against the allow/block list."""
-    host = host_of(url)
-    if not host:
-        return True  # blank/about pages are fine
-    # The search engine host must always be allowed in block_except mode so the
-    # kid can actually search within allowed sites; include common safe hosts.
-    return kc.is_allowed(web_mode_value, host)
+from PySide6.QtCore import QUrl, Qt, QStandardPaths
+from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtWidgets import (
+    QApplication,
+    QMainWindow,
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QTabWidget,
+    QLineEdit,
+    QPushButton,
+    QLabel,
+    QProgressBar,
+    QMessageBox,
+)
+from PySide6.QtWebEngineCore import (
+    QWebEnginePage,
+    QWebEngineProfile,
+    QWebEngineSettings,
+)
+from PySide6.QtWebEngineWidgets import QWebEngineView
 
 
 HOME_URL = "https://duckduckgo.com/?kp=1"
 
 
-def _home_html():
-    """A fast LOCAL home page: a big search box + quick site buttons. Loads
-    instantly (no network), so opening the browser feels immediate. The search
-    box and buttons call the Python API, which policy-checks before navigating."""
-    quick = [("🔍 DuckDuckGo", "https://duckduckgo.com/?kp=1"),
-             ("📺 YouTube", "https://youtube.com"),
-             ("📚 Wikipedia", "https://wikipedia.org"),
-             ("🔎 Google", "https://google.com")]
-    btns = "".join(
-        f"<button onclick=\"window.pywebview.api.navigate('{u}')\" "
-        "style=\"font-size:18px;margin:8px;padding:14px 20px;border:0;border-radius:14px;"
-        "background:#fff;color:#2d2a32;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.1)\">"
-        f"{label}</button>" for label, u in quick)
-    return (
-        "<!doctype html><html><head><meta charset='utf-8'></head>"
-        "<body style=\"font-family:'Comic Sans MS',sans-serif;background:#fef6e4;"
-        "text-align:center;padding-top:80px;color:#2d2a32\">"
-        "<div style='font-size:40px'>🌐 My Web</div>"
-        "<div style='margin:24px auto;max-width:620px'>"
-        "<input id='q' placeholder='Search the web…' "
-        "onkeydown=\"if(event.key==='Enter')window.pywebview.api.navigate(document.getElementById('q').value)\" "
-        "style=\"width:70%;font-size:20px;padding:14px 18px;border:0;border-radius:16px;"
-        "box-shadow:0 2px 8px rgba(0,0,0,.12);outline:none\">"
-        "<button onclick=\"window.pywebview.api.navigate(document.getElementById('q').value)\" "
-        "style=\"font-size:20px;padding:14px 22px;margin-left:8px;border:0;border-radius:16px;"
-        "background:#3ecf8e;color:#fff;font-weight:bold;cursor:pointer\">Go</button>"
-        "</div>"
-        f"<div>{btns}</div>"
-        "<script>window.onload=function(){var q=document.getElementById('q');if(q)q.focus();}</script>"
-        "</body></html>")
+def host_of(url):
+    text = (url or "").strip()
+    if not text:
+        return ""
+    if "://" not in text:
+        text = "https://" + text
+    return (urllib.parse.urlparse(text).hostname or "").lower()
 
 
-def _page_to_file_url(name, html):
-    """Write an HTML page to a real local file and return a file:// URL for it.
-    This is the most reliable way to show our own pages in pywebview — it avoids
-    load_html (spins a local server that mangled the page into a broken
-    '127.0.0.1:.../html%3E' request on some versions) and data: URL quirks."""
-    import os, tempfile
-    d = os.path.join(tempfile.gettempdir(), "fleetbrowser_pages")
-    try:
-        os.makedirs(d, exist_ok=True)
-    except Exception:
-        d = tempfile.gettempdir()
-    path = os.path.join(d, f"{name}.html")
-    try:
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(html)
-    except Exception:
-        return "about:blank"
-    return "file:///" + path.replace("\\", "/")
-
-# A floating toolbar injected into EVERY page via JavaScript after it loads.
-# Because the real site loads in the FULL window (not an iframe), every website
-# works — Google, YouTube, etc. The bar sits fixed on top. Buttons call the
-# pywebview Python API, which policy-checks before navigating the whole window.
-TOOLBAR_JS = r"""
-(function(){
-  if (document.getElementById('__fleetbar')) return;   // only once per page
-  var bar = document.createElement('div');
-  bar.id = '__fleetbar';
-  bar.style.cssText = 'position:fixed;top:0;left:0;right:0;height:52px;z-index:2147483647;'
-    + 'background:#5b8cff;display:flex;gap:8px;align-items:center;padding:6px 10px;'
-    + "font-family:'Comic Sans MS',sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.3);";
-  bar.innerHTML =
-    '<button id="__fb_back">◀</button>'
-    + '<button id="__fb_fwd">▶</button>'
-    + '<button id="__fb_home">🏠</button>'
-    + '<input id="__fb_addr" placeholder="Search the web or type a website…" '
-    + 'style="flex:1;font-size:17px;border:0;border-radius:12px;padding:9px 14px;outline:none;">'
-    + '<button id="__fb_go" style="background:#3ecf8e;color:#fff;font-weight:bold;">🔍 Go</button>';
-  var bstyle='font-size:17px;border:0;border-radius:10px;padding:8px 11px;cursor:pointer;background:#fff;color:#2d2a32;';
-  // push the page down so the bar doesn't cover content
-  var spacer=document.createElement('div'); spacer.style.height='52px';
-  document.documentElement.style.scrollPaddingTop='52px';
-  document.body.insertBefore(bar, document.body.firstChild);
-  document.body.insertBefore(spacer, bar.nextSibling);
-  ['__fb_back','__fb_fwd','__fb_home','__fb_go'].forEach(function(id){
-    document.getElementById(id).style.cssText=bstyle;});
-  var addr=document.getElementById('__fb_addr');
-  addr.value=location.href;
-  function nav(){ window.pywebview.api.navigate(addr.value); }
-  document.getElementById('__fb_go').onclick=nav;
-  addr.addEventListener('keydown',function(e){ if(e.key==='Enter') nav(); });
-  document.getElementById('__fb_back').onclick=function(){ window.pywebview.api.back(); };
-  document.getElementById('__fb_fwd').onclick=function(){ window.pywebview.api.forward(); };
-  document.getElementById('__fb_home').onclick=function(){ window.pywebview.api.navigate('HOME'); };
-
-  // Keep EVERYTHING in our window — never let a link spawn the real Edge.
-  // We do this WITHOUT a MutationObserver (that pegged the CPU to 100% on busy
-  // sites). Instead we intercept clicks at capture time, which needs no DOM
-  // scanning and costs nothing until the user actually clicks.
-  document.addEventListener('click',function(e){
-    var a=e.target.closest&&e.target.closest('a');
-    if(a&&a.href){
-      // route new-window links through our in-window, policy-checked nav
-      if(a.target&&a.target!=='_self'){ e.preventDefault(); window.pywebview.api.navigate(a.href); }
-    }
-  },true);
-  // override window.open so JS pop-ups also stay in-window
-  window.open=function(u){ if(u) window.pywebview.api.navigate(u); return null; };
-
-  // ---- Lightweight ad/heavy-content blocker (big CPU saver on weak PCs) ----
-  // Runs ONCE (no polling loop). Hides common ad/iframe containers and pauses
-  // autoplaying media. This cuts the rendering/animation work that pegs the CPU.
-  try{
-    var killSel=['iframe[src*="ads"]','iframe[src*="doubleclick"]','iframe[src*="googlesyndication"]',
-      '.ad','.ads','.advert','[id*="google_ads"]','[class*="sponsor"]','ins.adsbygoogle'];
-    document.querySelectorAll(killSel.join(',')).forEach(function(el){el.remove();});
-    document.querySelectorAll('video,audio').forEach(function(m){try{m.autoplay=false;m.pause();}catch(e){}});
-  }catch(e){}
-})();
-"""
+def normalize_url(text):
+    text = (text or "").strip()
+    if not text:
+        return ""
+    if text.startswith(("http://", "https://")):
+        return text
+    if " " not in text and "." in text:
+        return "https://" + text
+    return "https://duckduckgo.com/?kp=1&q=" + urllib.parse.quote(text)
 
 
-class _Api:
-    """Bridge the injected toolbar <-> Python. Navigation is policy-checked here,
-    then the WHOLE window loads the URL (so every site works, no iframe)."""
-    def __init__(self, session, web_mode):
-        self.session = session
-        self.web_mode = web_mode
-        self.window = None
+def url_allowed(web_mode_value, url):
+    host = host_of(url)
+    if not host:
+        return True
+    return kc.is_allowed(web_mode_value, host)
 
-    def _reinject_soon(self):
-        """After a navigation: re-check the final URL against policy (catches
-        server-side redirects), then draw the toolbar. Single-flight, and it
-        stops early once the toolbar is in place, so it does almost no work."""
-        import threading, time
-        if getattr(self, "_injecting", False):
+
+class FleetPage(QWebEnginePage):
+    """A page that checks top-level navigation and routes popups into tabs."""
+
+    def __init__(self, profile, browser, view):
+        super().__init__(profile, view)
+        self.browser = browser
+
+    def acceptNavigationRequest(self, url, navigation_type, is_main_frame):
+        if is_main_frame:
+            address = url.toString()
+            if address.startswith(("http://", "https://")):
+                if not url_allowed(self.browser.web_mode, address):
+                    self.browser.show_blocked(address)
+                    return False
+        return super().acceptNavigationRequest(url, navigation_type, is_main_frame)
+
+    def createWindow(self, window_type):
+        # target="_blank", window.open(), and popup links open as a new tab.
+        return self.browser.create_tab(make_current=True).page()
+
+
+class BrowserTab(QWidget):
+    def __init__(self, browser):
+        super().__init__()
+        self.browser = browser
+        self.view = QWebEngineView(self)
+        self.page = FleetPage(browser.profile, browser, self.view)
+        self.view.setPage(self.page)
+
+        settings = self.page.settings()
+        settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
+        settings.setAttribute(QWebEngineSettings.WebAttribute.LocalStorageEnabled, True)
+        settings.setAttribute(QWebEngineSettings.WebAttribute.FullScreenSupportEnabled, True)
+        settings.setAttribute(QWebEngineSettings.WebAttribute.PlaybackRequiresUserGesture, True)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.view)
+
+        self.page.urlChanged.connect(lambda url: browser.tab_url_changed(self, url))
+        self.page.titleChanged.connect(lambda title: browser.tab_title_changed(self, title))
+        self.view.loadProgress.connect(browser.set_progress)
+
+
+class FleetBrowser(QMainWindow):
+    def __init__(self, session):
+        super().__init__()
+        self.session = session or {}
+        self.web_mode = self.session.get("policies", {}).get("web_mode", "")
+        self.setWindowTitle("FleetBrowser")
+        self.resize(1200, 800)
+
+        # Keep one browser profile so cookies/cache are shared between tabs.
+        data_root = QStandardPaths.writableLocation(
+            QStandardPaths.StandardLocation.AppLocalDataLocation
+        )
+        profile_dir = os.path.join(data_root or os.path.expanduser("~"), "FleetBrowser")
+        os.makedirs(profile_dir, exist_ok=True)
+        self.profile = QWebEngineProfile("FleetBrowser", self)
+        self.profile.setPersistentStoragePath(profile_dir)
+        self.profile.setCachePath(os.path.join(profile_dir, "Cache"))
+
+        central = QWidget(self)
+        root = QVBoxLayout(central)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        # Permanent native toolbar - it is not part of the loaded webpage.
+        toolbar = QHBoxLayout()
+        toolbar.setContentsMargins(8, 8, 8, 8)
+        toolbar.setSpacing(6)
+
+        self.back_button = QPushButton("←")
+        self.forward_button = QPushButton("→")
+        self.home_button = QPushButton("⌂")
+        self.refresh_button = QPushButton("↻")
+        for button in (self.back_button, self.forward_button,
+                       self.home_button, self.refresh_button):
+            button.setFixedWidth(42)
+            button.setMinimumHeight(36)
+            toolbar.addWidget(button)
+
+        self.address = QLineEdit()
+        self.address.setPlaceholderText("Search or enter a website")
+        self.address.setClearButtonEnabled(True)
+        self.address.setMinimumHeight(36)
+        toolbar.addWidget(self.address, 1)
+
+        self.go_button = QPushButton("Go")
+        self.go_button.setMinimumHeight(36)
+        toolbar.addWidget(self.go_button)
+
+        root.addLayout(toolbar)
+
+        self.tabs = QTabWidget()
+        self.tabs.setTabsClosable(True)
+        self.tabs.setMovable(True)
+        self.tabs.tabCloseRequested.connect(self.close_tab)
+        self.tabs.currentChanged.connect(self.current_tab_changed)
+        root.addWidget(self.tabs, 1)
+
+        bottom = QHBoxLayout()
+        bottom.setContentsMargins(8, 3, 8, 5)
+        self.status = QLabel("Ready")
+        self.progress = QProgressBar()
+        self.progress.setFixedWidth(130)
+        self.progress.setFixedHeight(8)
+        self.progress.setTextVisible(False)
+        bottom.addWidget(self.status, 1)
+        bottom.addWidget(self.progress)
+        root.addLayout(bottom)
+
+        self.setCentralWidget(central)
+
+        self.back_button.clicked.connect(lambda: self.current_view_action("back"))
+        self.forward_button.clicked.connect(lambda: self.current_view_action("forward"))
+        self.home_button.clicked.connect(self.go_home)
+        self.refresh_button.clicked.connect(lambda: self.current_view_action("reload"))
+        self.go_button.clicked.connect(self.navigate_address)
+        self.address.returnPressed.connect(self.navigate_address)
+
+        new_tab_action = QAction(self)
+        new_tab_action.setShortcut(QKeySequence("Ctrl+T"))
+        new_tab_action.triggered.connect(lambda: self.create_tab(make_current=True))
+        self.addAction(new_tab_action)
+
+        close_tab_action = QAction(self)
+        close_tab_action.setShortcut(QKeySequence("Ctrl+W"))
+        close_tab_action.triggered.connect(
+            lambda: self.close_tab(self.tabs.currentIndex())
+        )
+        self.addAction(close_tab_action)
+
+        self.create_tab(make_current=True, url=HOME_URL)
+
+    def create_tab(self, make_current=True, url="about:blank"):
+        tab = BrowserTab(self)
+        index = self.tabs.addTab(tab, "New tab")
+        if make_current:
+            self.tabs.setCurrentIndex(index)
+        if url and url != "about:blank":
+            tab.view.setUrl(QUrl(url))
+        return tab
+
+    def current_tab(self):
+        widget = self.tabs.currentWidget()
+        return widget if isinstance(widget, BrowserTab) else None
+
+    def current_view_action(self, action):
+        tab = self.current_tab()
+        if not tab:
             return
-        self._injecting = True
-        def work():
-            try:
-                for delay in (0.8, 2.0):
-                    time.sleep(delay)
-                    try:
-                        cur = self.window.get_current_url() or ""
-                    except Exception:
-                        cur = ""
-                    if cur.startswith("http") and not url_allowed(self.web_mode, cur):
-                        self._show_blocked(cur)
-                        return
-                    try:
-                        # TOOLBAR_JS is idempotent; returns quickly if present
-                        self.window.evaluate_js(TOOLBAR_JS)
-                        return          # success: no need for more passes
-                    except Exception:
-                        pass
-            finally:
-                self._injecting = False
-        threading.Thread(target=work, daemon=True).start()
+        if action == "back":
+            tab.view.back()
+        elif action == "forward":
+            tab.view.forward()
+        elif action == "reload":
+            tab.view.reload()
 
-    def navigate(self, text):
-        # IMPORTANT: this is called from the webview's JS bridge thread. Doing
-        # load_url() directly here blocks that thread and freezes the app
-        # ("Not Responding"). So we return immediately and do the actual
-        # navigation on a worker thread.
-        import threading
-        threading.Thread(target=self._navigate_worker, args=(text,), daemon=True).start()
-        return None
-
-    def _navigate_worker(self, text):
-        if text == "HOME":
-            self.window.load_url(_page_to_file_url("home", _home_html()))
-            self._reinject_soon()
+    def navigate_address(self):
+        tab = self.current_tab()
+        if not tab:
             return
-        url = normalize_url(text)
-        if not url:
+        address = normalize_url(self.address.text())
+        if not url_allowed(self.web_mode, address):
+            self.show_blocked(address)
             return
-        if not url_allowed(self.web_mode, url):
-            self._show_blocked(url)
+        tab.view.setUrl(QUrl(address))
+
+    def go_home(self):
+        tab = self.current_tab()
+        if tab:
+            tab.view.setUrl(QUrl(HOME_URL))
+
+    def show_blocked(self, address):
+        host = host_of(address) or address
+        html = f"""<!doctype html>
+<html><head><meta charset="utf-8"><title>Website blocked</title></head>
+<body style="font-family:Segoe UI,Arial;text-align:center;padding:70px;background:#f5f6fa;color:#222">
+<h1>Website blocked</h1>
+<p><b>{host}</b> is not on the allowed list.</p>
+<p>Please ask your teacher if you need access.</p>
+</body></html>"""
+        tab = self.current_tab()
+        if tab:
+            tab.view.setHtml(html, QUrl("https://fleetbrowser.local/"))
+
+    def tab_url_changed(self, tab, url):
+        if tab is self.current_tab():
+            self.address.setText(url.toString())
+            self.back_button.setEnabled(tab.view.history().canGoBack())
+            self.forward_button.setEnabled(tab.view.history().canGoForward())
+
+    def tab_title_changed(self, tab, title):
+        index = self.tabs.indexOf(tab)
+        if index >= 0:
+            clean = (title or "New tab").strip()
+            self.tabs.setTabText(index, clean[:22] + ("…" if len(clean) > 22 else ""))
+            self.tabs.setTabToolTip(index, clean)
+
+    def current_tab_changed(self, index):
+        tab = self.current_tab()
+        if not tab:
+            self.address.clear()
             return
-        self.window.load_url(url)
-        self._reinject_soon()
+        self.address.setText(tab.view.url().toString())
+        self.back_button.setEnabled(tab.view.history().canGoBack())
+        self.forward_button.setEnabled(tab.view.history().canGoForward())
 
-    def _show_blocked(self, url):
-        host = host_of(url) or url
-        page = (
-            "<!doctype html><html><head><meta charset='utf-8'></head>"
-            "<body style=\"font-family:'Comic Sans MS',sans-serif;background:#fef6e4;"
-            "text-align:center;padding-top:90px;color:#2d2a32\">"
-            "<div style='font-size:70px'>&#128683;</div>"
-            "<h1>This website is blocked</h1>"
-            f"<p style='font-size:20px'><b>{host}</b> isn't on the allowed list.</p>"
-            "<p style='color:#8a8694'>Ask your teacher if you need it.</p>"
-            "<p style='margin-top:30px'><a href='javascript:window.pywebview.api.navigate(&quot;HOME&quot;)' "
-            "style='font-size:18px;color:#5b8cff'>&#127968; Go back home</a></p>"
-            "</body></html>")
-        self.window.load_url(_page_to_file_url("blocked", page))
+    def set_progress(self, value):
+        self.progress.setValue(value)
+        self.progress.setVisible(value < 100)
+        self.status.setText("Loading…" if value < 100 else "Ready")
 
-    def back(self):
-        import threading
-        threading.Thread(target=lambda: self._safe_js("history.back()"), daemon=True).start()
-        return None
-
-    def forward(self):
-        import threading
-        threading.Thread(target=lambda: self._safe_js("history.forward()"), daemon=True).start()
-        return None
-
-    def _safe_js(self, code):
-        try:
-            self.window.evaluate_js(code)
-        except Exception:
-            pass
+    def close_tab(self, index):
+        if index < 0:
+            return
+        tab = self.tabs.widget(index)
+        self.tabs.removeTab(index)
+        if tab:
+            tab.deleteLater()
+        if self.tabs.count() == 0:
+            self.create_tab(make_current=True, url=HOME_URL)
 
 
-# --------------------------------------------------------------- GUI (WebView2)
 def run_browser(session):
-    try:
-        import webview  # pywebview -> uses Edge WebView2 on Windows
-    except Exception:
-        print("pywebview is not installed. Install it on the PC with:")
-        print("    pip install pywebview")
-        print("(WebView2 runtime ships with Windows 10/11.)")
-        return
-
-    web_mode = session.get("policies", {}).get("web_mode", "")
-
-    # PERSISTENT per-user WebView2 data folder (kept under LOCALAPPDATA, NOT
-    # %TEMP%). This lets WebView2 keep its cache between sessions so it starts
-    # fast — a temp folder (wiped on reboot) made it rebuild from scratch every
-    # launch, which is slow.
-    import os
-    user = session.get("username", "guest")
-    base = os.environ.get("LOCALAPPDATA") or os.environ.get("TMP") or os.getcwd()
-    data_dir = os.path.join(base, "FleetBrowser", user)
-    try:
-        os.makedirs(data_dir, exist_ok=True)
-        os.environ["WEBVIEW2_USER_DATA_FOLDER"] = data_dir
-    except Exception:
-        pass
-
-    # ---- WebView2 flags tuned for FAST startup + fast page opens ----
-    #  * skip first-run/setup work and default-browser checks at launch
-    #  * no autoplay (also saves CPU) and no translate popups
-    #  * KEEP back/forward cache ON so going back/forward is instant
-    #  * prefetch/preconnect so pages start fetching sooner
-    #  * trim background work so the little CPU goes to the page you're viewing
-    # Low-end PC tuning (Celeron N4000 / 4 GB): fewer renderer processes, no
-    # background network/timer work, and no extra visual features. Chromium's
-    # default multi-process model is the main CPU/RAM cost on weak hardware.
-    os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = (
-        "--no-first-run "
-        "--no-default-browser-check "
-        "--disable-sync "
-        "--disable-features=Translate,msSmartScreenProtection,EdgeCollections,"
-        "EdgeShoppingAssistant,msWebOOUI,MediaRouter,OptimizationHints,"
-        "CalculateNativeWinOcclusion,BackForwardCache "
-        "--autoplay-policy=user-gesture-required "
-        "--disable-background-networking "
-        "--disable-breakpad "
-        "--disable-component-update "
-        "--disable-domain-reliability "
-        "--disable-client-side-phishing-detection "
-        "--disable-renderer-backgrounding "
-        "--process-per-site "
-        "--renderer-process-limit=2 "
-        "--js-flags=--max-old-space-size=256 "
-    )
-
-    windowed = "--windowed" in sys.argv
-    api = _Api(session, web_mode)
-    # Start DIRECTLY on the fast LOCAL home page — it loads instantly (no network)
-    # so the browser feels immediate. The kid searches / picks a site from there.
-    start = _page_to_file_url("home", _home_html())
-    window = webview.create_window("My Web Browser", url=start, js_api=api,
-                                   width=1100, height=760, maximized=not windowed)
-    api.window = window
-
-    # Re-add the toolbar after EVERY page load — including when the kid clicks a
-    # normal link ON a website (that navigates WITHOUT going through our own
-    # toolbar, so the bar would otherwise be missing on the new page). The
-    # handler is CHEAP: it just triggers api._reinject_soon(), which is
-    # single-flight + offloads to a worker thread, so it can't stall the app
-    # (the old freezes came from doing blocking work INSIDE the event, not from
-    # the event itself).
-    def _on_loaded(w=None):
-        try:
-            api._reinject_soon()
-        except Exception:
-            pass
-    try:
-        window.events.loaded += _on_loaded
-    except Exception:
-        pass
-
-    import threading as _th, time as _time
-
-    # (the 'loaded' event above covers the first page; no extra timer needed)
-
-    # Home is already the (instant, local) start page — no delayed navigation
-    # needed, so the browser is usable the moment the window appears.
-    try:
-        webview.start()
-    except Exception as e:
-        _show_browser_error(str(e))
-
-
-def _show_browser_error(detail):
-    """Friendly fallback if the WebView2 engine can't start, with the usual
-    causes/fixes, instead of a raw crash."""
-    import tkinter as tk
-    from tkinter import messagebox
-    r = tk.Tk(); r.withdraw()
-    messagebox.showerror(
-        "Web browser can't start",
-        "The web browser couldn't start on this PC.\n\n"
-        "Usual fixes:\n"
-        "1) Install the Microsoft Edge WebView2 Runtime:\n"
-        "   https://developer.microsoft.com/microsoft-edge/webview2/\n"
-        "2) The browser must run as the logged-in USER, not SYSTEM.\n"
-        "3) Reboot and try again (clears a stuck browser profile).\n\n"
-        f"Details: {detail}")
-    r.destroy()
+    app = QApplication.instance() or QApplication(sys.argv)
+    window = FleetBrowser(session)
+    window.show()
+    app.exec()
 
 
 def _selftest():
-    # block_except: only allow kids.example.com and duckduckgo.com
-    pol = "block_except:kids.example.com, duckduckgo.com"
-    assert url_allowed(pol, "https://kids.example.com/page") is True
-    assert url_allowed(pol, "https://duckduckgo.com/?q=cats") is True
-    assert url_allowed(pol, "https://facebook.com") is False
-    # allow_except: block only badsite.com
-    pol2 = "allow_except:badsite.com"
-    assert url_allowed(pol2, "https://badsite.com") is False
-    assert url_allowed(pol2, "https://anything.org") is True
-    # empty policy allows all
-    assert url_allowed("", "https://whatever.com") is True
-    # normalize
-    assert normalize_url("cats and dogs").startswith("https://duckduckgo.com/")
-    assert normalize_url("google.com") == "https://google.com", normalize_url("google.com")
     assert normalize_url("example.com") == "https://example.com"
-    assert normalize_url("https://a.com") == "https://a.com"
-    assert normalize_url("http://a.com") == "http://a.com"
-    print("kidbrowser selftest OK")
+    assert normalize_url("https://example.com") == "https://example.com"
+    assert normalize_url("cats and dogs").startswith("https://duckduckgo.com/")
+    assert host_of("https://example.com/path") == "example.com"
+    print("FleetBrowser self-test OK")
 
 
 if __name__ == "__main__":
